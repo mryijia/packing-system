@@ -517,12 +517,7 @@
       <div class="batch-chips" id="batchChips"></div>
     </div>
 
-    <div class="filters">
-      <button class="filter-btn active" data-filter="all" onclick="setFilter('all')">全部</button>
-      <button class="filter-btn" data-filter="half" onclick="setFilter('half')">装一半</button>
-      <button class="filter-btn" data-filter="done" onclick="setFilter('done')">装完</button>
-      <button class="filter-btn" data-filter="empty" onclick="setFilter('empty')">空的</button>
-    </div>
+    <div class="filters" id="statusFilters"></div>
 
     <div class="batch-op-bar" id="batchOpBar" style="display:none">
       <input type="checkbox" id="selAllBox" onchange="toggleSelectAll(this.checked)">
@@ -751,6 +746,7 @@ function getFilteredWarehouses() {
 function render() {
   renderStats();
   renderBatchChips();
+  renderStatusFilters();
   renderWhList();
   renderBatchOpBar();
   renderMain();
@@ -781,6 +777,30 @@ function renderBatchChips() {
       const act = state.selectedBatch === b.id ? 'active' : '';
       return `<div class="batch-chip ${act}" onclick="setBatch('${b.id}')">${escapeHtml(b.name)} (${cnt})</div>`;
     }).join('')}
+  `;
+}
+
+function renderStatusFilters() {
+  const el = document.getElementById('statusFilters');
+  if (!el) return;
+  // 数量统计：跟随当前批次，但不受状态筛选/搜索词影响（不然数字乱跳）
+  let pool = state.warehouses;
+  if (state.selectedBatch !== 'all') {
+    pool = pool.filter(w => w.batchId === state.selectedBatch);
+  }
+  let all = pool.length, empty = 0, half = 0, done = 0;
+  pool.forEach(w => {
+    const st = getWarehouseStatus(w);
+    if (st === 'empty') empty++;
+    else if (st === 'half') half++;
+    else if (st === 'done') done++;
+  });
+  const cur = state.filter;
+  el.innerHTML = `
+    <button class="filter-btn ${cur==='all'?'active':''}"   onclick="setFilter('all')">全部 (${all})</button>
+    <button class="filter-btn ${cur==='half'?'active':''}" onclick="setFilter('half')">装一半 (${half})</button>
+    <button class="filter-btn ${cur==='done'?'active':''}" onclick="setFilter('done')">装完 (${done})</button>
+    <button class="filter-btn ${cur==='empty'?'active':''}" onclick="setFilter('empty')">空的 (${empty})</button>
   `;
 }
 
@@ -1076,9 +1096,6 @@ function scrollToTop() {
 // ========== 筛选 / 选择 ==========
 function setFilter(f) {
   state.filter = f;
-  document.querySelectorAll('.filter-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.filter === f);
-  });
   render();
 }
 function setBatch(bid) {
