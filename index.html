@@ -183,20 +183,15 @@
     font-size: 13px; font-weight: 600; color: #1f2937; margin-bottom: 4px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .copy-btn {
-    display: inline-block;
-    cursor: pointer;
-    font-size: 13px;
-    opacity: 0;
-    transition: opacity 0.15s;
-    margin-left: 4px;
-    user-select: none;
+  .click-copy {
+    cursor: copy;
+    border-bottom: 1px dashed #d1d5db;
+    transition: color 0.15s, border-color 0.15s;
   }
-  .wh-card:hover .copy-btn,
-  .dist-wh-link:hover + .copy-btn,
-  h2:hover .copy-btn,
-  td:hover .copy-btn { opacity: 0.5; }
-  .copy-btn:hover { opacity: 1 !important; color: #4f46e5; }
+  .click-copy:hover {
+    color: #4f46e5;
+    border-color: #4f46e5;
+  }
   .wh-card .wh-meta {
     display: flex; justify-content: space-between; align-items: center;
     font-size: 11px; color: #6b7280;
@@ -901,9 +896,7 @@ function renderWhList() {
         <input type="checkbox" class="wh-check" ${isSelected?'checked':''}
                onchange="toggleOneSel('${w.id}', this.checked)" onclick="event.stopPropagation()">
         <div class="wh-main" onclick="selectWarehouse('${w.id}')">
-          <div class="wh-name">📦 ${markKw(w.name, kw)}${w.note ? ' <span style="color:#9ca3af;font-weight:normal;font-size:12px">· ' + markKw(w.note, kw) + '</span>' : ''}
-            <span class="copy-btn" onclick="event.stopPropagation();copyText('${escapeHtml(w.name)}','${escapeHtml(w.name)}')" title="点击复制柜号">📋</span>
-          </div>
+          <div class="wh-name">📦 <span class="click-copy" onclick="event.stopPropagation();copyText('${escapeHtml(w.name)}','${escapeHtml(w.name)}')" title="点击复制柜号">${markKw(w.name, kw)}</span>${w.note ? ' <span style="color:#9ca3af;font-weight:normal;font-size:12px">· ' + markKw(w.note, kw) + '</span>' : ''}</div>
           <div class="wh-meta">
             <span><span class="wh-batch">${markKw(batchName, kw)}</span>${w.items.length} 种 · ${qty} 件</span>
             <span class="status-badge ${st}">${stText}</span>
@@ -1008,7 +1001,7 @@ function renderMain() {
   main.innerHTML = `
     <div class="main-header">
       <div>
-        <h2>📦 ${escapeHtml(wh.name)} <span class="copy-btn" onclick="event.stopPropagation();copyText('${escapeHtml(wh.name)}','${escapeHtml(wh.name)}')" title="点击复制柜号">📋</span></h2>
+        <h2>📦 <span class="click-copy" onclick="copyText('${escapeHtml(wh.name)}','${escapeHtml(wh.name)}')" title="点击复制柜号">${escapeHtml(wh.name)}</span></h2>
         <div style="font-size:13px;color:#6b7280;margin-top:4px">
           <span style="background:#eef2ff;color:#4f46e5;padding:2px 8px;border-radius:10px;font-size:11px">${escapeHtml(getBatchName(wh.batchId))}</span>
           ${wh.note ? '· ' + escapeHtml(wh.note) + ' · ' : ' · '}
@@ -1076,8 +1069,7 @@ function renderWarehouseOverview() {
       const stText = { empty:'空', half:'装了一半', done:'已装完' }[st];
       return `
         <tr>
-          <td><a class="dist-wh-link" onclick="selectWarehouse('${w.id}')">📦 ${escapeHtml(w.name)}${w.note ? ' · ' + escapeHtml(w.note) : ''}</a>
-            <span class="copy-btn" onclick="event.stopPropagation();copyText('${escapeHtml(w.name)}','${escapeHtml(w.name)}')" title="点击复制柜号">📋</span></td>
+          <td><a class="dist-wh-link" onclick="selectWarehouse('${w.id}')">📦 <span class="click-copy" onclick="event.stopPropagation();copyText('${escapeHtml(w.name)}','${escapeHtml(w.name)}')" title="点击复制柜号">${escapeHtml(w.name)}</span>${w.note ? ' · ' + escapeHtml(w.note) : ''}</a></td>
           <td style="text-align:center">${w.items.length}</td>
           <td class="num" style="text-align:right">${total}</td>
           <td><span class="status-badge ${st}">${stText}</span></td>
@@ -1155,10 +1147,9 @@ function renderItemDistribution() {
           if (group.length === 0) return '';
           const whLinks = group.map(d =>
             `<div style="padding:3px 0 3px 4px">
-              <a class="dist-wh-link" onclick="selectWarehouse('${d.wid}');scrollToTop()">📦 ${escapeHtml(d.wname)}
+              <a class="dist-wh-link" onclick="selectWarehouse('${d.wid}');scrollToTop()">📦 <span class="click-copy" onclick="event.stopPropagation();copyText('${escapeHtml(d.wname)}','${escapeHtml(d.wname)}')" title="点击复制柜号">${escapeHtml(d.wname)}</span>
                 <span class="batch-tag">${escapeHtml(d.batchName)}</span>
               </a>
-              <span class="copy-btn" onclick="event.stopPropagation();copyText('${escapeHtml(d.wname)}','${escapeHtml(d.wname)}')" title="点击复制柜号">📋</span>
               <span style="color:#4f46e5;font-weight:600;margin-left:6px">×${d.qty}</span>
             </div>`
           ).join('');
@@ -1454,8 +1445,8 @@ function renderBatchModal() {
         <div style="font-size:11px;color:#9ca3af">${cnt} 个仓库</div>
       </div>
       <div style="display:flex;gap:6px">
-        ${!isDefault ? `<button class="btn btn-secondary btn-sm" onclick="renameBatch('${b.id}')">重命名</button>` : ''}
-        ${!isDefault ? `<button class="btn btn-danger btn-sm" onclick="deleteBatch('${b.id}')">删除</button>` : ''}
+        <button class="btn btn-secondary btn-sm" onclick="renameBatch('${b.id}')">重命名</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBatch('${b.id}')">删除</button>
       </div>
     </div>`;
   }).join('');
