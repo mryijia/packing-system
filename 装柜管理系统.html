@@ -906,25 +906,71 @@ function renderMain() {
   const wh = state.warehouses.find(w => w.id === state.selectedId);
 
   if (!wh) {
+    // ===== 全局一览模式 =====
+    const totalWh = state.warehouses.length;
+    const halfWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'half').length;
+    const doneWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'done').length;
+    const emptyWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'empty').length;
+    const totalItems = state.warehouses.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
+    const typeCount = new Set(state.warehouses.flatMap(w => w.items.map(i => i.name))).size;
+
     main.innerHTML = `
-      <div class="empty-state">
-        <div class="big-icon">📭</div>
-        <p>从左侧选择一个仓库，或新建一个开始</p>
-        <p style="font-size:12px;color:#9ca3af;margin-top:6px">（再次点击已选中的仓库可取消选中）</p>
+      <div class="main-header">
+        <div>
+          <h2>📊 全局一览</h2>
+          <div style="font-size:13px;color:#6b7280;margin-top:4px">
+            点击左侧仓库查看详情 · 再点一次取消选中
+          </div>
+        </div>
       </div>
+
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px">
+        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+          <div style="font-size:22px;font-weight:700;color:#4f46e5">${totalWh}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px">仓库总数</div>
+        </div>
+        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+          <div style="font-size:22px;font-weight:700;color:#059669">${doneWh}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px">已装完</div>
+        </div>
+        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+          <div style="font-size:22px;font-weight:700;color:#d97706">${halfWh}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px">装了一半</div>
+        </div>
+        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+          <div style="font-size:22px;font-weight:700;color:#9ca3af">${emptyWh}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px">空仓库</div>
+        </div>
+        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
+          <div style="font-size:22px;font-weight:700;color:#4f46e5">${totalItems}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px">总件数 · ${typeCount} 种</div>
+        </div>
+      </div>
+
       <div class="global-summary">
-        <h3 class="collapsible" onclick="toggleSection('global')">
-          <span class="chevron">${state.collapsed.global ? '▶' : '▼'}</span>
-          📊 全部仓库物品汇总
+        <h3 class="collapsible" onclick="toggleSection('ov')">
+          <span class="chevron">${state.collapsed.ov ? '▶' : '▼'}</span>
+          📦 仓库总览（按批次分组，点击仓库名跳转）
         </h3>
-        <div class="${state.collapsed.global ? 'collapsed-body' : ''}">
-          ${renderGlobalSummary()}
+        <div class="${state.collapsed.ov ? 'collapsed-body' : ''}">
+          ${renderWarehouseOverview()}
+        </div>
+      </div>
+
+      <div class="global-summary">
+        <h3 class="collapsible" onclick="toggleSection('dist')">
+          <span class="chevron">${state.collapsed.dist ? '▶' : '▼'}</span>
+          📋 物品跨仓库分布（点击物品行展开看在哪些仓库里）
+        </h3>
+        <div class="${state.collapsed.dist ? 'collapsed-body' : ''}">
+          ${renderItemDistribution()}
         </div>
       </div>
     `;
     return;
   }
 
+  // ===== 仓库聚焦模式 =====
   const totalQty = wh.items.reduce((s, i) => s + (i.qty || 0), 0);
   const st = getWarehouseStatus(wh);
   const stText = { empty:'空', half:'装了一半', done:'已装完' }[st];
@@ -979,36 +1025,58 @@ function renderMain() {
           `).join('')}
         </tbody>
       </table>
-      <div class="summary-section">
-        <h3 class="collapsible" onclick="toggleSection('summary')">
-          <span class="chevron">${state.collapsed.summary ? '▶' : '▼'}</span>
-          📋 当前仓库汇总 (${wh.items.length})
-        </h3>
-        <div class="summary-grid ${state.collapsed.summary ? 'collapsed' : ''}">
-          ${wh.items.map(item => `
-            <div class="summary-item">
-              <span class="s-name">${escapeHtml(item.name)}</span>
-              <span class="s-num">×${item.qty}</span>
-            </div>
-          `).join('')}
-        </div>
-      </div>
     `}
-
-    <div class="global-summary">
-      <h3 class="collapsible" onclick="toggleSection('global')">
-        <span class="chevron">${state.collapsed.global ? '▶' : '▼'}</span>
-        📊 全部仓库物品汇总
-      </h3>
-      <div class="${state.collapsed.global ? 'collapsed-body' : ''}">
-        ${renderGlobalSummary()}
-      </div>
-    </div>
   `;
 }
 
-function renderGlobalSummary() {
-  // 物品分布
+function renderWarehouseOverview() {
+  // 仓库汇总表（按批次分组）
+  if (state.warehouses.length === 0) {
+    return '<div class="wh-empty">还没有任何仓库</div>';
+  }
+  const totalAll = state.warehouses.reduce((s, w) =>
+    s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
+
+  const grouped = state.batches.map(b => {
+    const whs = state.warehouses.filter(w => w.batchId === b.id);
+    if (whs.length === 0) return '';
+    const rows = whs.map(w => {
+      const total = w.items.reduce((s,i) => s+(i.qty||0), 0);
+      const st = getWarehouseStatus(w);
+      const stText = { empty:'空', half:'装了一半', done:'已装完' }[st];
+      return `
+        <tr>
+          <td><a class="dist-wh-link" onclick="selectWarehouse('${w.id}')">📦 ${escapeHtml(w.name)}${w.note ? ' · ' + escapeHtml(w.note) : ''}</a></td>
+          <td style="text-align:center">${w.items.length}</td>
+          <td class="num" style="text-align:right">${total}</td>
+          <td><span class="status-badge ${st}">${stText}</span></td>
+        </tr>
+      `;
+    }).join('');
+    const qty = whs.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
+    return `
+      <div style="margin-bottom:14px">
+        <div style="font-size:12px;color:#4f46e5;margin:12px 0 6px;padding-left:10px;border-left:3px solid #4f46e5">
+          📁 ${escapeHtml(b.name)} <span style="color:#9ca3af;font-weight:normal">(${whs.length} 个 · ${qty} 件)</span>
+        </div>
+        <table class="global-table">
+          <thead><tr>
+            <th>仓库 / 柜号</th>
+            <th style="text-align:center;width:80px">种类</th>
+            <th style="text-align:right;width:80px">总数</th>
+            <th style="width:100px">状态</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }).join('');
+
+  return grouped || '<div class="wh-empty">还没有任何仓库数据</div>';
+}
+
+function renderItemDistribution() {
+  // 物品跨仓库分布（按总件数排序）
   const itemDist = {};
   state.warehouses.forEach(w => {
     w.items.forEach(item => {
@@ -1030,43 +1098,24 @@ function renderGlobalSummary() {
     return tb - ta;
   });
 
-  // 仓库汇总表
-  const warehouseRows = state.warehouses.map(w => {
-    const total = w.items.reduce((s,i) => s+(i.qty||0), 0);
-    const st = getWarehouseStatus(w);
-    const stText = { empty:'空', half:'装了一半', done:'已装完' }[st];
-    return `
-      <tr>
-        <td>
-          <span class="wh-batch" style="background:#eef2ff;color:#4f46e5;padding:1px 6px;border-radius:8px;font-size:10px">${escapeHtml(getBatchName(w.batchId))}</span>
-          ${escapeHtml(w.name)}${w.note ? ' · ' + escapeHtml(w.note) : ''}
-        </td>
-        <td style="text-align:center">${w.items.length}</td>
-        <td class="num" style="text-align:right">${total}</td>
-        <td><span class="status-badge ${st}">${stText}</span></td>
-      </tr>
-    `;
-  }).join('');
-
-  if (entries.length === 0 && state.warehouses.every(w => w.items.length === 0)) {
+  if (entries.length === 0) {
     return '<div class="wh-empty">还没有任何物品数据</div>';
   }
 
-  // 物品分布表
   const distStatusOrder = ['half', 'done', 'empty'];
   const distStatusLabel = { half:'🟠 装了一半', done:'🟢 已装完', empty:'⚪ 空的' };
 
   const itemRows = entries.map(([name, dist], i) => {
     const total = dist.reduce((s, x) => s + x.qty, 0);
+    const expanded = state.expandedDist['dist-' + i];
 
-    // 预览 tag（前3个）
+    // 仓库名预览（默认前 3 个 tag）
     const distTags = dist.slice(0, 3).map(d =>
       `<span class="dist-tag">${escapeHtml(d.wname)} ×${d.qty}</span>`
     ).join('');
     const more = dist.length > 3 ? `<span class="dist-more">+${dist.length - 3}</span>` : '';
 
     // 展开：按状态分组
-    const expanded = state.expandedDist['dist-' + i];
     let detailHtml = '';
     if (expanded) {
       detailHtml = distStatusOrder
@@ -1089,13 +1138,13 @@ function renderGlobalSummary() {
     }
 
     return `
-      <tr class="item-dist-row" onclick="toggleDist('dist-${i}', 'icon-${i}')">
+      <tr class="item-dist-row" onclick="toggleDist('dist-${i}')">
         <td style="font-weight:500">
-          <span class="expand-icon" id="icon-${i}">${expanded ? '▼' : '▶'}</span>
+          <span class="expand-icon">${expanded ? '▼' : '▶'}</span>
           ${escapeHtml(name)}
         </td>
-        <td class="num" style="text-align:right">${total}</td>
-        <td style="text-align:center;color:#6b7280">${dist.length}</td>
+        <td class="num" style="text-align:right;width:90px">${total}</td>
+        <td style="text-align:center;width:100px;color:#6b7280">${dist.length}</td>
         <td>${distTags}${more}</td>
       </tr>
       ${expanded ? `<tr><td colspan="4" style="background:#fafbfc;border-top:none;padding:8px 16px 14px">${detailHtml}</td></tr>` : ''}
@@ -1105,26 +1154,13 @@ function renderGlobalSummary() {
   return `
     <table class="global-table">
       <thead><tr>
-        <th>仓库 / 柜号</th>
-        <th style="text-align:center">种类</th>
-        <th style="text-align:right">总数</th>
-        <th>状态</th>
+        <th style="width:40%">物品名称</th>
+        <th style="text-align:right;width:90px">总数</th>
+        <th style="text-align:center;width:120px">分布仓库数</th>
+        <th>仓库预览（点击行展开）</th>
       </tr></thead>
-      <tbody>${warehouseRows}</tbody>
+      <tbody>${itemRows}</tbody>
     </table>
-
-    <div style="margin-top:20px">
-      <h3 style="font-size:14px;color:#374151;margin-bottom:10px">📋 物品分布明细（点击任意物品展开查看 <b>按状态分组</b> 的仓库位置，点击仓库名跳转）</h3>
-      <table class="global-table">
-        <thead><tr>
-          <th style="width:40%">物品名称</th>
-          <th style="text-align:right;width:90px">总数</th>
-          <th style="text-align:center;width:120px">分布仓库数</th>
-          <th>仓库预览（点击行展开）</th>
-        </tr></thead>
-        <tbody>${itemRows}</tbody>
-      </table>
-    </div>
   `;
 }
 
@@ -1528,43 +1564,69 @@ async function exportPNG() {
   }
   toast('正在生成图片，请稍候...');
 
-  // 构造一个独立 DOM 节点（含 inline CSS），放到屏幕外，html2canvas 只捕获它
   const dateStr = new Date().toISOString().slice(0, 10);
   const now = new Date().toLocaleString('zh-CN');
 
   const totalWh = state.warehouses.length;
   const halfWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'half').length;
   const doneWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'done').length;
+  const emptyWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'empty').length;
   const totalItems = state.warehouses.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
 
-  // 全部批次汇总
-  const sections = state.batches.map(b => {
+  // ===== 仓库汇总表（按批次分组，一个仓库一行） =====
+  const whSections = state.batches.map(b => {
     const whs = state.warehouses.filter(w => w.batchId === b.id);
     if (whs.length === 0) return '';
-    const cards = whs.map(w => {
-      const items = w.items.map((it, i) =>
-        `<tr><td style="padding:5px 12px;border-top:1px solid #f3f4f6;color:#9ca3af;width:32px">${i+1}</td>
-          <td style="padding:5px 12px;border-top:1px solid #f3f4f6">${escapeHtml(it.name)}</td>
-          <td style="padding:5px 12px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5">${it.qty}</td></tr>`
-      ).join('') || `<tr><td colspan="3" style="padding:10px;text-align:center;color:#9ca3af">（无物品）</td></tr>`;
+    const rows = whs.map(w => {
       const qty = w.items.reduce((s, i) => s + (i.qty || 0), 0);
-      return `<div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;margin-bottom:8px">
-        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px">
-          <b>📦 ${escapeHtml(w.name)}</b>
-          <span style="color:#6b7280;font-size:11px">${w.items.length} 种 · ${qty} 件</span>
-        </div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px">
-          <thead><tr style="background:#f9fafb">
-            <th style="text-align:left;padding:4px 12px;color:#6b7280;font-size:11px;width:32px">#</th>
-            <th style="text-align:left;padding:4px 12px;color:#6b7280;font-size:11px">物品</th>
-            <th style="text-align:right;padding:4px 12px;color:#6b7280;font-size:11px;width:60px">数量</th>
-          </tr></thead><tbody>${items}</tbody></table>
-      </div>`;
+      const st = getWarehouseStatus(w);
+      const stBadge = { empty:'⚪ 空', half:'🟠 装一半', done:'🟢 已装完' }[st];
+      return `<tr>
+        <td style="padding:6px 12px;border-top:1px solid #f3f4f6">${escapeHtml(w.name)}${w.note?' · '+escapeHtml(w.note):''}</td>
+        <td style="padding:6px 12px;border-top:1px solid #f3f4f6;text-align:center">${w.items.length}</td>
+        <td style="padding:6px 12px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5">${qty}</td>
+        <td style="padding:6px 12px;border-top:1px solid #f3f4f6;font-size:11px">${stBadge}</td>
+      </tr>`;
     }).join('');
-    return `<div style="margin-bottom:14px">
-      <div style="font-size:14px;font-weight:600;color:#4f46e5;margin:6px 0;padding-left:10px;border-left:3px solid #4f46e5">📁 ${escapeHtml(b.name)}（${whs.length} 个仓库）</div>
-      ${cards}
+    const qty = whs.reduce((s, w) => w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
+    return `<div style="margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600;color:#4f46e5;margin:10px 0 6px;padding-left:10px;border-left:3px solid #4f46e5">📁 ${escapeHtml(b.name)} <span style="color:#9ca3af;font-weight:normal;font-size:11px">(${whs.length} 个 · ${qty} 件)</span></div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;background:white;border-radius:8px;overflow:hidden">
+        <thead><tr style="background:#f9fafb">
+          <th style="text-align:left;padding:5px 12px;color:#6b7280;font-size:11px">仓库 / 柜号</th>
+          <th style="text-align:center;padding:5px 12px;color:#6b7280;font-size:11px;width:60px">种类</th>
+          <th style="text-align:right;padding:5px 12px;color:#6b7280;font-size:11px;width:60px">总数</th>
+          <th style="text-align:left;padding:5px 12px;color:#6b7280;font-size:11px;width:80px">状态</th>
+        </tr></thead><tbody>${rows}</tbody>
+      </table>
     </div>`;
+  }).join('');
+
+  // ===== 物品跨仓库分布表 =====
+  const itemDist = {};
+  state.warehouses.forEach(w => {
+    w.items.forEach(item => {
+      const key = item.name.trim();
+      if (!key) return;
+      if (!itemDist[key]) itemDist[key] = [];
+      itemDist[key].push({ wname: w.name, qty: item.qty || 0 });
+    });
+  });
+  const entries = Object.entries(itemDist).sort((a, b) =>
+    b[1].reduce((s, x) => s + x.qty, 0) - a[1].reduce((s, x) => s + x.qty, 0));
+
+  const itemRows = entries.map(([name, dist]) => {
+    const total = dist.reduce((s, x) => s + x.qty, 0);
+    const tags = dist.slice(0, 4).map(d =>
+      `<span style="display:inline-block;background:#eef2ff;color:#4f46e5;padding:1px 7px;border-radius:8px;font-size:10px;margin-right:3px;margin-bottom:2px">${escapeHtml(d.wname)}×${d.qty}</span>`
+    ).join('');
+    const more = dist.length > 4 ? `<span style="color:#9ca3af;font-size:10px">+${dist.length - 4}</span>` : '';
+    return `<tr>
+      <td style="padding:6px 12px;border-top:1px solid #f3f4f6;font-weight:500">${escapeHtml(name)}</td>
+      <td style="padding:6px 12px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5;width:70px">${total}</td>
+      <td style="padding:6px 12px;border-top:1px solid #f3f4f6;width:140px;text-align:center;color:#6b7280">${dist.length}</td>
+      <td style="padding:6px 12px;border-top:1px solid #f3f4f6">${tags}${more}</td>
+    </tr>`;
   }).join('');
 
   const html = `
@@ -1574,26 +1636,44 @@ async function exportPNG() {
   width:900px;padding:24px 28px;line-height:1.4;">
   <div style="font-size:22px;font-weight:700;color:#111827;margin-bottom:4px">📦 装柜数据报表</div>
   <div style="color:#6b7280;font-size:12px;margin-bottom:18px">${now}</div>
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:18px">
+
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px">
     <div style="background:white;border-radius:8px;padding:10px;text-align:center">
-      <div style="font-size:22px;font-weight:700;color:#4f46e5">${totalWh}</div>
+      <div style="font-size:20px;font-weight:700;color:#4f46e5">${totalWh}</div>
       <div style="font-size:11px;color:#6b7280;margin-top:2px">仓库</div>
     </div>
     <div style="background:white;border-radius:8px;padding:10px;text-align:center">
-      <div style="font-size:22px;font-weight:700;color:#d97706">${halfWh}</div>
-      <div style="font-size:11px;color:#6b7280;margin-top:2px">装一半</div>
-    </div>
-    <div style="background:white;border-radius:8px;padding:10px;text-align:center">
-      <div style="font-size:22px;font-weight:700;color:#059669">${doneWh}</div>
+      <div style="font-size:20px;font-weight:700;color:#059669">${doneWh}</div>
       <div style="font-size:11px;color:#6b7280;margin-top:2px">已装完</div>
     </div>
     <div style="background:white;border-radius:8px;padding:10px;text-align:center">
-      <div style="font-size:22px;font-weight:700;color:#4f46e5">${totalItems}</div>
+      <div style="font-size:20px;font-weight:700;color:#d97706">${halfWh}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px">装一半</div>
+    </div>
+    <div style="background:white;border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:20px;font-weight:700;color:#9ca3af">${emptyWh}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px">空仓库</div>
+    </div>
+    <div style="background:white;border-radius:8px;padding:10px;text-align:center">
+      <div style="font-size:20px;font-weight:700;color:#4f46e5">${totalItems}</div>
       <div style="font-size:11px;color:#6b7280;margin-top:2px">总件数</div>
     </div>
   </div>
-  ${sections || '<div style="color:#9ca3af;text-align:center;padding:40px">暂无仓库数据</div>'}
-  <div style="text-align:center;color:#9ca3af;font-size:11px;margin-top:20px;padding-top:12px;border-top:1px solid #e5e7eb">装柜管理系统 · ${dateStr}</div>
+
+  <div style="font-size:14px;font-weight:600;color:#374151;margin:18px 0 10px">📦 仓库汇总（按批次分组）</div>
+  ${whSections || '<div style="color:#9ca3af;text-align:center;padding:20px">暂无仓库数据</div>'}
+
+  ${itemRows ? `<div style="font-size:14px;font-weight:600;color:#374151;margin:20px 0 10px">📋 物品跨仓库分布</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px;background:white;border-radius:8px;overflow:hidden">
+    <thead><tr style="background:#f9fafb">
+      <th style="text-align:left;padding:5px 12px;color:#6b7280;font-size:11px">物品名称</th>
+      <th style="text-align:right;padding:5px 12px;color:#6b7280;font-size:11px;width:70px">总数</th>
+      <th style="text-align:center;padding:5px 12px;color:#6b7280;font-size:11px;width:140px">分布仓库数</th>
+      <th style="text-align:left;padding:5px 12px;color:#6b7280;font-size:11px">仓库预览</th>
+    </tr></thead><tbody>${itemRows}</tbody>
+  </table>` : ''}
+
+  <div style="text-align:center;color:#9ca3af;font-size:11px;margin-top:22px;padding-top:12px;border-top:1px solid #e5e7eb">装柜管理系统 · ${dateStr}</div>
 </div>`;
 
   // 放到屏幕外
@@ -1608,7 +1688,7 @@ async function exportPNG() {
   try {
     const canvas = await html2canvas(wrap.firstElementChild, {
       backgroundColor: '#f0f2f5',
-      scale: 2,        // 2x 清晰
+      scale: 2,
       useCORS: true,
       allowTaint: true,
       logging: false
