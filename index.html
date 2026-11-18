@@ -78,6 +78,7 @@
   .stat-card .label { font-size: 11px; color: #6b7280; margin-top: 2px; }
   .stat-card.done .num { color: #059669; }
   .stat-card.half .num { color: #d97706; }
+  .stat-card.empty .num { color: #9ca3af; }
 
   /* 搜索框 */
   .search-box {
@@ -99,6 +100,13 @@
     content: '🔍'; position: absolute; left: 26px; top: 50%; transform: translateY(-50%);
     font-size: 12px; pointer-events: none;
   }
+  .search-clear {
+    position: absolute; right: 24px; top: 50%; transform: translateY(-50%);
+    width: 20px; height: 20px; border: none; border-radius: 50%;
+    background: #e5e7eb; color: #6b7280; font-size: 11px; line-height: 20px;
+    cursor: pointer; padding: 0;
+  }
+  .search-clear:hover { background: #d1d5db; color: #1f2937; }
 
   /* 批次筛选 */
   .batch-filter {
@@ -503,10 +511,15 @@
         <div class="num" id="statHalf">0</div>
         <div class="label">装了一半</div>
       </div>
+      <div class="stat-card empty">
+        <div class="num" id="statEmpty">0</div>
+        <div class="label">空仓库</div>
+      </div>
     </div>
 
     <div class="search-box">
       <input type="text" id="searchInput" placeholder="搜索仓库名或物品..." oninput="onSearch(this.value)">
+      <button type="button" id="searchClear" class="search-clear" style="display:none" onclick="document.getElementById('searchInput').value='';onSearch('')">✕</button>
     </div>
 
     <div class="batch-filter">
@@ -522,7 +535,10 @@
     <div class="batch-op-bar" id="batchOpBar" style="display:none">
       <input type="checkbox" id="selAllBox" onchange="toggleSelectAll(this.checked)">
       <span class="count">已选 <b id="selCount">0</b> 个</span>
-      <button onclick="deleteSelected()">🗑️ 批量删除</button>
+      <button onclick="batchSetStatus('done')" title="全部标为已装完">✓ 装完</button>
+      <button onclick="batchSetStatus('half')" title="全部改为装一半">◯ 一半</button>
+      <button onclick="batchSetStatus('empty')" title="全部改回空">○ 空</button>
+      <button onclick="deleteSelected()" style="color:#dc2626">🗑️ 删除</button>
       <button onclick="clearSelection()">取消</button>
     </div>
 
@@ -751,20 +767,26 @@ function render() {
   renderBatchOpBar();
   renderMain();
   saveData();
+  // 同步搜索清空按钮显隐
+  const clearBtn = document.getElementById('searchClear');
+  if (clearBtn) clearBtn.style.display = state.searchKw ? '' : 'none';
 }
 
 function renderStats() {
-  // 统计基于全部仓库（不受筛选影响）
+  // 统计基于全部仓库（不受筛选影响），统一用 getWarehouseStatus
   const total = state.warehouses.length;
-  let done = 0, half = 0;
+  let done = 0, half = 0, empty = 0;
   state.warehouses.forEach(w => {
-    if (w.items.length === 0) return;
-    if (w.status === 'done') done++;
-    else half++;
+    const st = getWarehouseStatus(w);
+    if (st === 'done') done++;
+    else if (st === 'half') half++;
+    else empty++;
   });
   document.getElementById('statTotal').textContent = total;
   document.getElementById('statDone').textContent = done;
   document.getElementById('statHalf').textContent = half;
+  const elEmpty = document.getElementById('statEmpty');
+  if (elEmpty) elEmpty.textContent = empty;
 }
 
 function renderBatchChips() {
@@ -903,8 +925,9 @@ function renderMain() {
       <div class="wh-controls">
         <label style="font-size:13px;color:#6b7280">状态:</label>
         <select class="status-select" onchange="updateStatus('${wh.id}', this.value)">
-          <option value="half" ${wh.status==='half'?'selected':''}>装了一半</option>
-          <option value="done" ${wh.status==='done'?'selected':''}>已装完</option>
+          <option value="empty" ${st==='empty'?'selected':''}>空的</option>
+          <option value="half" ${st==='half'?'selected':''}>装了一半</option>
+          <option value="done" ${st==='done'?'selected':''}>已装完</option>
         </select>
         <button class="btn btn-secondary btn-sm" onclick="openWarehouseModal('${wh.id}')">✏️ 编辑</button>
         <button class="btn btn-primary btn-sm" onclick="openItemModal()">+ 添加物品</button>
@@ -1107,6 +1130,9 @@ function setBatch(bid) {
 function onSearch(kw) {
   state.searchKw = (kw || '').trim();
   state.selectedWIds.clear();
+  // 控制清空按钮显隐
+  const clearBtn = document.getElementById('searchClear');
+  if (clearBtn) clearBtn.style.display = state.searchKw ? '' : 'none';
   renderWhList();
   renderBatchOpBar();
 }
@@ -1149,11 +1175,30 @@ function deleteSelected() {
 // ========== 状态更新 ==========
 function updateStatus(id, status) {
   const wh = state.warehouses.find(w => w.id === id);
-  if (wh) {
-    wh.status = status;
-    toast('状态已更新');
-    render();
-  }
+  if (!wh) return;
+  // 设为 empty 时清空物品，保持数据一致
+  if (status === 'empty') wh.items = [];
+  wh.status = status;
+  toast('状态已更新');
+  render();
+}
+
+function batchSetStatus(status) {
+  const ids = Array.from(state.selectedWIds);
+  if (ids.length === 0) return;
+  const label = { empty:'空的', half:'装了一半', done:'已装完' }[status];
+  const names = ids.map(id => state.warehouses.find(w => w.id === id)?.name).filter(Boolean);
+  if (!confirm(`将以下 ${ids.length} 个仓库标记为「${label}」？\n${status==='empty'?'⚠️ 这会同时清空这些仓库里的所有物品！':''}\n\n${names.slice(0,5).join('\n')}${names.length>5?`\n...等 ${names.length} 个`:''}`)) return;
+  ids.forEach(id => {
+    const wh = state.warehouses.find(w => w.id === id);
+    if (wh) {
+      if (status === 'empty') wh.items = [];
+      wh.status = status;
+    }
+  });
+  state.selectedWIds.clear();
+  toast(`已标记 ${ids.length} 个仓库为「${label}」`);
+  render();
 }
 
 // ========== 仓库 CRUD ==========
@@ -1375,8 +1420,8 @@ function exportCSV() {
 
   // 2. 统计概览
   const totalWh = state.warehouses.length;
-  const halfWh = state.warehouses.filter(w => w.items.length > 0 && w.status === 'half').length;
-  const doneWh = state.warehouses.filter(w => w.items.length > 0 && w.status === 'done').length;
+  const halfWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'half').length;
+  const doneWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'done').length;
   const totalItemTypes = new Set(state.warehouses.flatMap(w => w.items.map(i => i.name))).size;
   const totalItems = state.warehouses.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
   rows.push(['📊 统计概览']);
@@ -1455,8 +1500,8 @@ async function exportPNG() {
   const now = new Date().toLocaleString('zh-CN');
 
   const totalWh = state.warehouses.length;
-  const halfWh = state.warehouses.filter(w => w.items.length > 0 && w.status === 'half').length;
-  const doneWh = state.warehouses.filter(w => w.items.length > 0 && w.status === 'done').length;
+  const halfWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'half').length;
+  const doneWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'done').length;
   const totalItems = state.warehouses.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
 
   // 全部批次汇总
@@ -1559,8 +1604,8 @@ function exportVisualReport() {
   const timeStr = now.toLocaleString('zh-CN');
 
   const totalWh = state.warehouses.length;
-  const halfWh = state.warehouses.filter(w => w.items.length > 0 && w.status === 'half').length;
-  const doneWh = state.warehouses.filter(w => w.items.length > 0 && w.status === 'done').length;
+  const halfWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'half').length;
+  const doneWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'done').length;
   const totalItemTypes = new Set(state.warehouses.flatMap(w => w.items.map(i => i.name))).size;
   const totalItems = state.warehouses.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
 
