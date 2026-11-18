@@ -258,6 +258,13 @@
   .summary-item .s-name { font-size: 13px; color: #4b5563; }
   .summary-item .s-num { font-size: 16px; font-weight: 700; color: #4f46e5; }
 
+  /* 可折叠 section */
+  h3.collapsible { cursor: pointer; user-select: none; }
+  h3.collapsible:hover { color: #4f46e5; }
+  h3.collapsible .chevron { font-size: 11px; color: #9ca3af; width: 14px; display: inline-block; }
+  .summary-grid.collapsed,
+  .collapsed-body { display: none; }
+
   .empty-state { text-align: center; padding: 80px 20px; color: #9ca3af; }
   .empty-state .big-icon { font-size: 64px; margin-bottom: 16px; }
   .empty-state p { font-size: 15px; }
@@ -641,7 +648,11 @@ let state = {
   selectedBatch: 'all',   // all | batchId
   searchKw: '',
   selectedWIds: new Set(),
-  expandedDist: {}        // {dist-i: true}
+  expandedDist: {},       // {dist-i: true}
+  collapsed: {            // 汇总区折叠状态
+    summary: false,       // 当前仓库汇总
+    global: false         // 全部仓库物品汇总
+  }
 };
 let editingWhId = null;
 let editingItemIdx = null;
@@ -899,10 +910,16 @@ function renderMain() {
       <div class="empty-state">
         <div class="big-icon">📭</div>
         <p>从左侧选择一个仓库，或新建一个开始</p>
+        <p style="font-size:12px;color:#9ca3af;margin-top:6px">（再次点击已选中的仓库可取消选中）</p>
       </div>
       <div class="global-summary">
-        <h3>📊 全部物品汇总</h3>
-        ${renderGlobalSummary()}
+        <h3 class="collapsible" onclick="toggleSection('global')">
+          <span class="chevron">${state.collapsed.global ? '▶' : '▼'}</span>
+          📊 全部仓库物品汇总
+        </h3>
+        <div class="${state.collapsed.global ? 'collapsed-body' : ''}">
+          ${renderGlobalSummary()}
+        </div>
       </div>
     `;
     return;
@@ -963,8 +980,11 @@ function renderMain() {
         </tbody>
       </table>
       <div class="summary-section">
-        <h3>📋 当前仓库汇总</h3>
-        <div class="summary-grid">
+        <h3 class="collapsible" onclick="toggleSection('summary')">
+          <span class="chevron">${state.collapsed.summary ? '▶' : '▼'}</span>
+          📋 当前仓库汇总 (${wh.items.length})
+        </h3>
+        <div class="summary-grid ${state.collapsed.summary ? 'collapsed' : ''}">
           ${wh.items.map(item => `
             <div class="summary-item">
               <span class="s-name">${escapeHtml(item.name)}</span>
@@ -976,8 +996,13 @@ function renderMain() {
     `}
 
     <div class="global-summary">
-      <h3>📊 全部仓库物品汇总</h3>
-      ${renderGlobalSummary()}
+      <h3 class="collapsible" onclick="toggleSection('global')">
+        <span class="chevron">${state.collapsed.global ? '▶' : '▼'}</span>
+        📊 全部仓库物品汇总
+      </h3>
+      <div class="${state.collapsed.global ? 'collapsed-body' : ''}">
+        ${renderGlobalSummary()}
+      </div>
     </div>
   `;
 }
@@ -1111,6 +1136,13 @@ function toggleDist(idxKey, iconId) {
   saveData();
 }
 
+function toggleSection(name) {
+  if (!state.collapsed) state.collapsed = {};
+  state.collapsed[name] = !state.collapsed[name];
+  renderMain();
+  saveData();
+}
+
 function scrollToTop() {
   const m = document.getElementById('mainArea');
   if (m) m.scrollTop = 0;
@@ -1138,7 +1170,8 @@ function onSearch(kw) {
 }
 
 function selectWarehouse(id) {
-  state.selectedId = id;
+  // 再点同一个仓库 = 取消选中
+  state.selectedId = (state.selectedId === id) ? null : id;
   closeDrawer(); // 手机上选完仓库自动关抽屉
   render();
 }
