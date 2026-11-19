@@ -1090,16 +1090,6 @@ function renderMain() {
       </div>
 
       <div class="global-summary">
-        <h3 class="collapsible" onclick="toggleSection('ov')">
-          <span class="chevron">${state.collapsed.ov ? '▶' : '▼'}</span>
-          📦 仓库总览（按批次分组，点击仓库名跳转）
-        </h3>
-        <div class="${state.collapsed.ov ? 'collapsed-body' : ''}">
-          ${renderWarehouseOverview()}
-        </div>
-      </div>
-
-      <div class="global-summary">
         <h3 class="collapsible" onclick="toggleSection('dist')">
           <span class="chevron">${state.collapsed.dist ? '▶' : '▼'}</span>
           📋 物品跨仓库分布（点击物品行展开看在哪些仓库里）
