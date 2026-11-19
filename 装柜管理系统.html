@@ -42,6 +42,11 @@
     transition: background 0.2s;
   }
   .topbar .actions button:hover { background: rgba(255,255,255,0.25); }
+  .topbar .actions .btn-cloud { background: #059669; border-color: #047857; }
+  .topbar .actions .btn-cloud:hover { background: #047857; }
+  .topbar .actions .btn-team { background: #2563eb; border-color: #1d4ed8; }
+  .topbar .actions .btn-team:hover { background: #1d4ed8; }
+  .sync-status { font-size: 11px; margin-left: 8px; opacity: 0.9; }
 
   /* 主布局 */
   .layout {
@@ -499,6 +504,9 @@
   <button class="menu-btn" onclick="toggleDrawer()" aria-label="菜单">☰</button>
   <h1>📦 装柜管理系统</h1>
   <div class="actions">
+    <button class="btn-cloud" id="btnSync" onclick="syncFromCloud(true)" title="从云端拉取最新数据">☁️ 同步</button>
+    <button class="btn-team" id="btnTeam" onclick="setTeamCode()" title="设置/切换团队码">👥 团队码</button>
+    <span class="sync-status" id="syncStatus"></span>
     <button onclick="exportCSV()">📄 CSV</button>
     <button onclick="exportPNG()">🖼️ 图片</button>
     <button onclick="exportVisualReport()">📊 HTML</button>
@@ -649,6 +657,12 @@ const STORAGE_KEY_V2 = 'packing_system_data_v2';
 const STORAGE_KEY_V1 = 'packing_system_data_v1';
 const DEFAULT_BATCH = { id: 'none', name: '未分类' };
 
+// ========== 云端同步配置 ==========
+// 👇 把这里改成你的 Cloudflare Workers 地址（创建好 Workers 后粘贴）
+const CF_API_BASE = '';
+const TEAM_KEY = 'packing_team_code';          // 团队码存本地的 key
+let teamCode = localStorage.getItem(TEAM_KEY) || '';   // 当前团队码
+
 let state = {
   batches: [],            // [{id, name}]
   warehouses: [],         // [{id, name, batchId, note, status, items:[{name, qty}]}]
@@ -670,33 +684,11 @@ function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
-function loadData() {
-  // 优先读 V2
-  let raw = localStorage.getItem(STORAGE_KEY_V2);
-  let v1Migrate = false;
-
-  if (!raw) {
-    raw = localStorage.getItem(STORAGE_KEY_V1);
-    v1Migrate = !!raw;
-  }
-
-  if (raw) {
-    try {
-      const data = JSON.parse(raw);
-      state.batches = (data.batches && Array.isArray(data.batches)) ? data.batches : [];
-      state.warehouses = (data.warehouses && Array.isArray(data.warehouses)) ? data.warehouses : [];
-    } catch(e) {
-      state.warehouses = [];
-      state.batches = [];
-    }
-  }
-
-  // 确保默认批次存在
+// 数据兜底：确保默认批次存在 + 每个仓库字段完整（本地/云端数据都走一遍）
+function ensureDataIntegrity() {
   if (!state.batches.find(b => b.id === DEFAULT_BATCH.id)) {
     state.batches.unshift({ ...DEFAULT_BATCH });
   }
-
-  // 兼容 / 迁移每个仓库
   state.warehouses = state.warehouses.map(w => {
     let batchId = w.batchId || null;
     if (!batchId || !state.batches.find(b => b.id === batchId)) {
@@ -711,16 +703,140 @@ function loadData() {
       items: w.items || []
     };
   });
-
-  // 写回 V2（迁移成功就顺便升版）
-  saveData();
 }
 
-function saveData() {
+function loadData() {
+  // 优先读 V2
+  let raw = localStorage.getItem(STORAGE_KEY_V2);
+  if (!raw) {
+    raw = localStorage.getItem(STORAGE_KEY_V1);  // V1 迁移
+  }
+  if (raw) {
+    try {
+      const data = JSON.parse(raw);
+      state.batches = (data.batches && Array.isArray(data.batches)) ? data.batches : [];
+      state.warehouses = (data.warehouses && Array.isArray(data.warehouses)) ? data.warehouses : [];
+    } catch(e) {
+      state.warehouses = [];
+      state.batches = [];
+    }
+  }
+  ensureDataIntegrity();
+  // 写回本地（迁移成功就顺便升版）
   localStorage.setItem(STORAGE_KEY_V2, JSON.stringify({
     batches: state.batches,
     warehouses: state.warehouses
   }));
+  // 如果配置了云端，异步拉取最新数据覆盖本地（不阻塞首屏渲染）
+  if (CF_API_BASE && teamCode) {
+    setTimeout(() => syncFromCloud(false), 300);
+  }
+}
+
+function saveData() {
+  // 先存本地（即时生效，离线可用）
+  localStorage.setItem(STORAGE_KEY_V2, JSON.stringify({
+    batches: state.batches,
+    warehouses: state.warehouses
+  }));
+  // 异步推送到云端（不阻塞 UI）
+  if (CF_API_BASE && teamCode) {
+    pushToCloud(false);
+  }
+}
+
+// ========== 云端同步 ==========
+// 从云端拉取并覆盖本地
+async function syncFromCloud(showToast = true) {
+  if (!CF_API_BASE) {
+    if (showToast) toast('未配置云端地址（CF_API_BASE 为空）');
+    return false;
+  }
+  if (!teamCode) {
+    if (showToast) toast('请先点击 ☁️ 设置团队码');
+    return false;
+  }
+  try {
+    const res = await fetch(`${CF_API_BASE}/data?team=${encodeURIComponent(teamCode)}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data && Array.isArray(data.warehouses)) {
+      state.batches = data.batches || [];
+      state.warehouses = data.warehouses || [];
+      ensureDataIntegrity();
+      localStorage.setItem(STORAGE_KEY_V2, JSON.stringify({
+        batches: state.batches,
+        warehouses: state.warehouses
+      }));
+      render();
+      if (showToast) toast(`已从云端同步（${state.warehouses.length} 个仓库）☁️`);
+      return true;
+    }
+  } catch(e) {
+    if (showToast) toast('云端拉取失败：' + e.message);
+  }
+  return false;
+}
+
+// 推送本地数据到云端
+async function pushToCloud(showToast = true) {
+  if (!CF_API_BASE || !teamCode) return false;
+  try {
+    const res = await fetch(`${CF_API_BASE}/data?team=${encodeURIComponent(teamCode)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        batches: state.batches,
+        warehouses: state.warehouses
+      })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (showToast) toast('已上传云端 ☁️');
+    return true;
+  } catch(e) {
+    if (showToast) toast('上传云端失败：' + e.message);
+  }
+  return false;
+}
+
+// 设置/切换团队码
+function setTeamCode() {
+  const cur = teamCode || '';
+  const code = prompt(
+    '输入团队码（手机和电脑输入相同的码就能同步）：\n\n' +
+    '第一次设置：输入你想创建的码（例如 mryijia2026）\n' +
+    '已有团队码：直接输入别人给你的码即可加入',
+    cur
+  );
+  if (code === null) return;  // 用户取消
+  const newCode = code.trim();
+  if (!newCode) {
+    teamCode = '';
+    localStorage.removeItem(TEAM_KEY);
+    toast('已断开云端同步');
+    render();
+    return;
+  }
+  teamCode = newCode;
+  localStorage.setItem(TEAM_KEY, teamCode);
+  toast(`团队码：${teamCode}，正在从云端拉取...`);
+  syncFromCloud(true);
+}
+
+// 更新顶栏同步状态显示
+function updateSyncStatus() {
+  const el = document.getElementById('syncStatus');
+  if (!el) return;
+  if (CF_API_BASE && teamCode) {
+    el.textContent = `✓ ${teamCode}`;
+    el.style.color = '#34d399';
+  } else if (teamCode) {
+    el.textContent = `⚠ 未配置云端`;
+    el.style.color = '#fbbf24';
+  } else {
+    el.textContent = '本地模式';
+    el.style.color = '#9ca3af';
+  }
 }
 
 // ========== 辅助 ==========
@@ -729,7 +845,9 @@ function getBatchName(id) {
   return b ? b.name : DEFAULT_BATCH.name;
 }
 function getWarehouseStatus(w) {
-  return w.items.length === 0 ? 'empty' : w.status;
+  // 尊重用户手动设置的状态；空仓库也能选"装一半"（表示正在装但还没录入物品）
+  // 自动化：添加首个物品时 empty→half（见 saveItem），删光物品时回 empty（见 deleteItem）
+  return w.status || 'empty';
 }
 function escapeHtml(str) {
   if (!str) return '';
@@ -801,6 +919,7 @@ function render() {
   renderBatchOpBar();
   renderMain();
   saveData();
+  updateSyncStatus();
   // 同步搜索清空按钮显隐
   const clearBtn = document.getElementById('searchClear');
   if (clearBtn) clearBtn.style.display = state.searchKw ? '' : 'none';
