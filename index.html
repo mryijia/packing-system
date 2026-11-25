@@ -1055,7 +1055,7 @@ function renderMain() {
   const wh = state.warehouses.find(w => w.id === state.selectedId);
 
   if (!wh) {
-    // ===== 未选仓库：简洁空状态，砍掉全局概览 =====
+    // ===== 未选仓库：批次头部 + 物品汇总 =====
     let pool = state.warehouses;
     if (state.selectedBatch !== '') {
       pool = pool.filter(w => w.batchId === state.selectedBatch);
@@ -1066,13 +1066,23 @@ function renderMain() {
     const empty = pool.filter(w => getWarehouseStatus(w) === 'empty').length;
 
     main.innerHTML = `
-      <div class="empty-state" style="padding:40px 20px">
-        <div class="big-icon">📦</div>
-        <h2 style="font-size:18px;margin-bottom:6px;color:#111827">${escapeHtml(batchLabel)}</h2>
-        <div style="color:#6b7280;font-size:13px;margin-bottom:16px">
-          ${pool.length} 个仓库 · 🟢${done} 装完 · 🟠${half} 装一半 · ⚪${empty} 空
+      <div class="main-header">
+        <div>
+          <h2>📦 ${escapeHtml(batchLabel)}</h2>
+          <div style="font-size:13px;color:#6b7280;margin-top:4px">
+            ${pool.length} 个仓库 · 🟢${done} 装完 · 🟠${half} 装一半 · ⚪${empty} 空
+          </div>
         </div>
-        <p style="color:#9ca3af;font-size:13px">👈 点击左侧仓库查看详情和编辑</p>
+      </div>
+
+      <div class="global-summary" style="margin-top:10px">
+        <h3 class="collapsible" onclick="toggleSection('dist')">
+          <span class="chevron">${state.collapsed.dist ? '▶' : '▼'}</span>
+          📋 物品跨仓库分布（点击物品行展开看在哪些仓库里）
+        </h3>
+        <div class="${state.collapsed.dist ? 'collapsed-body' : ''}">
+          ${renderItemDistribution(pool)}
+        </div>
       </div>
     `;
     return;
