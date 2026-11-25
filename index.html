@@ -504,9 +504,10 @@
   <button class="menu-btn" onclick="toggleDrawer()" aria-label="菜单">☰</button>
   <h1>📦 装柜管理系统</h1>
   <div class="actions">
-    <button class="btn-cloud" id="btnSync" onclick="syncFromCloud(true)" title="从云端拉取最新数据">☁️ 同步</button>
+    <!-- 云端同步按钮暂时隐藏（CF_API_BASE 未配置时无用，需要时打开下面注释） -->
+    <!-- <button class="btn-cloud" id="btnSync" onclick="syncFromCloud(true)" title="从云端拉取最新数据">☁️ 同步</button>
     <button class="btn-team" id="btnTeam" onclick="setTeamCode()" title="设置/切换团队码">👥 团队码</button>
-    <span class="sync-status" id="syncStatus"></span>
+    <span class="sync-status" id="syncStatus"></span> -->
     <button onclick="exportCSV()">📄 CSV</button>
     <button onclick="exportPNG()">🖼️ 图片</button>
     <button onclick="exportVisualReport()">📊 HTML</button>
