@@ -254,6 +254,22 @@
   .items-table .num-col { color: #4f46e5; font-weight: 600; width: 120px; }
   .items-table .action-col { width: 140px; }
 
+  /* 物品同名分组（仅末尾编号不同） */
+  .merge-hint {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+    border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 13px;
+  }
+  .merge-hint .btn { margin-left: auto; }
+  .group-row { background: #f8f9ff; }
+  .group-row td { border-top: 1px solid #e0e7ff !important; }
+  .group-badge {
+    display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 10px;
+    background: #eef2ff; color: #4f46e5; font-size: 11px; font-weight: 500;
+  }
+  .sub-item-row td { background: #fcfcfe; font-size: 13px; }
+  .sub-item-row .btn { padding: 2px 8px; font-size: 11px; }
+
   .summary-section {
     margin-top: 28px; background: white; border-radius: 12px;
     padding: 20px 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
@@ -673,6 +689,7 @@ let state = {
   searchKw: '',
   selectedWIds: new Set(),
   expandedDist: {},       // {dist-i: true}
+  expandedItemGroups: {}, // {仓库id|基础名: true} 物品同名分组展开状态
   collapsed: {            // 汇总区折叠状态
     summary: false,       // 当前仓库汇总
     global: false         // 全部仓库物品汇总
@@ -861,6 +878,17 @@ function escapeHtml(str) {
   div.textContent = String(str);
   return div.innerHTML;
 }
+
+// 物品"同类"判断：去掉名称末尾的「分隔符+数字」编号后相同即视为同一物品
+// 例：隧道药·ZML-KDN1-CDY-921 与 ...-846 → 都归为 隧道药·ZML-KDN1-CDY
+function itemGroupKey(name) {
+  const s = String(name || '').trim();
+  const stripped = s.replace(/[\s\-_·．.、＃#/]*\d+\s*$/, '').trim();
+  return stripped || s;
+}
+
+// 渲染时的物品分组缓存（供展开/合并按钮按下标访问，避免把名称拼进 onclick）
+let _itemGroups = [];
 function toast(msg) {
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -1024,7 +1052,7 @@ function renderWhList() {
         <div class="wh-main" onclick="selectWarehouse('${w.id}')">
           <div class="wh-name">📦 <span class="click-copy" onclick="event.stopPropagation();copyText('${escapeHtml(w.name)}','${escapeHtml(w.name)}')" title="点击复制柜号">${markKw(w.name, kw)}</span>${w.note ? ' <span style="color:#9ca3af;font-weight:normal;font-size:12px">· ' + markKw(w.note, kw) + '</span>' : ''}</div>
           <div class="wh-meta">
-            <span><span class="wh-batch">${markKw(batchName, kw)}</span>${w.items.length} 种 · ${qty} 件</span>
+            <span><span class="wh-batch">${markKw(batchName, kw)}</span>${new Set(w.items.map(i => itemGroupKey(i.name))).size} 种 · ${qty} 件</span>
             <span class="status-badge ${st}">${stText}</span>
           </div>
           ${hitHint}
@@ -1093,6 +1121,18 @@ function renderMain() {
   const st = getWarehouseStatus(wh);
   const stText = { empty:'空', half:'装了一半', done:'已装完' }[st];
 
+  // 按「去掉末尾编号」分组：同一物品不同编号合并显示成一行
+  const groups = [];
+  const gmap = {};
+  wh.items.forEach((item, idx) => {
+    const key = itemGroupKey(item.name);
+    if (!gmap[key]) { gmap[key] = { key, items: [] }; groups.push(gmap[key]); }
+    gmap[key].items.push({ idx, name: item.name, qty: item.qty || 0 });
+  });
+  _itemGroups = groups.map(g => ({ ...g, wid: wh.id }));
+  const typeCount = groups.length;          // 去重后的物品种类
+  const mergeableCount = groups.filter(g => g.items.length > 1).length;
+
   main.innerHTML = `
     <div class="main-header">
       <div>
@@ -1100,7 +1140,7 @@ function renderMain() {
         <div style="font-size:13px;color:#6b7280;margin-top:4px">
           <span style="background:#eef2ff;color:#4f46e5;padding:2px 8px;border-radius:10px;font-size:11px">${escapeHtml(getBatchName(wh.batchId))}</span>
           ${wh.note ? '· ' + escapeHtml(wh.note) + ' · ' : ' · '}
-          ${wh.items.length} 种物品 · 共 ${totalQty} 件
+          ${typeCount} 种物品 · 共 ${totalQty} 件
         </div>
       </div>
       <div class="wh-controls">
@@ -1122,6 +1162,13 @@ function renderMain() {
         <p>这个仓库还没有物品，点击右上角 <b>"+ 添加物品"</b> 开始吧</p>
       </div>
     ` : `
+      ${mergeableCount > 0 ? `
+        <div class="merge-hint">
+          💡 检测到 <b>${mergeableCount}</b> 组物品仅末尾编号不同（共 ${groups.filter(g=>g.items.length>1).reduce((s,g)=>s+g.items.length,0)} 条），
+          点击行内 <b>合并</b> 可并成一条
+          <button class="btn btn-primary btn-sm" onclick="mergeAllGroups()">全部合并</button>
+        </div>
+      ` : ''}
       <table class="items-table">
         <thead><tr>
           <th style="width:60px">#</th>
@@ -1130,17 +1177,54 @@ function renderMain() {
           <th class="action-col">操作</th>
         </tr></thead>
         <tbody>
-          ${wh.items.map((item, idx) => `
-            <tr>
-              <td style="color:#9ca3af">${idx + 1}</td>
-              <td>${escapeHtml(item.name)}</td>
-              <td class="num-col">${item.qty}</td>
-              <td>
-                <button class="btn btn-secondary btn-sm" onclick="openItemModal(${idx})">编辑</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteItem(${idx})">删除</button>
-              </td>
-            </tr>
-          `).join('')}
+          ${groups.map((g, gi) => {
+            const gQty = g.items.reduce((s, x) => s + x.qty, 0);
+            const gkey = wh.id + '|' + g.key;
+            const expanded = !!state.expandedItemGroups[gkey];
+
+            // 只有一条：普通行
+            if (g.items.length === 1) {
+              const it = g.items[0];
+              return `
+                <tr>
+                  <td style="color:#9ca3af">${gi + 1}</td>
+                  <td>${escapeHtml(it.name)}</td>
+                  <td class="num-col">${it.qty}</td>
+                  <td>
+                    <button class="btn btn-secondary btn-sm" onclick="openItemModal(${it.idx})">编辑</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteItem(${it.idx})">删除</button>
+                  </td>
+                </tr>`;
+            }
+
+            // 多条：合并成一行显示，可展开看明细
+            const subRows = expanded ? g.items.map(it => `
+              <tr class="sub-item-row">
+                <td></td>
+                <td style="padding-left:30px;color:#6b7280">↳ ${escapeHtml(it.name)}</td>
+                <td class="num-col" style="color:#6b7280">${it.qty}</td>
+                <td>
+                  <button class="btn btn-secondary btn-sm" onclick="openItemModal(${it.idx})">编辑</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteItem(${it.idx})">删除</button>
+                </td>
+              </tr>`).join('') : '';
+
+            return `
+              <tr class="group-row">
+                <td style="color:#9ca3af">${gi + 1}</td>
+                <td>
+                  <span class="expand-icon" onclick="toggleItemGroup(${gi})">${expanded ? '▼' : '▶'}</span>
+                  ${escapeHtml(g.key)}
+                  <span class="group-badge">${g.items.length} 个编号</span>
+                </td>
+                <td class="num-col" style="font-weight:600;color:#4f46e5">${gQty}</td>
+                <td>
+                  <button class="btn btn-secondary btn-sm" onclick="toggleItemGroup(${gi})">${expanded ? '收起' : '展开'}</button>
+                  <button class="btn btn-primary btn-sm" onclick="mergeItemGroup(${gi})">合并</button>
+                </td>
+              </tr>
+              ${subRows}`;
+          }).join('')}
         </tbody>
       </table>
     `}
@@ -1165,7 +1249,7 @@ function renderWarehouseOverview() {
       return `
         <tr>
           <td><a class="dist-wh-link" onclick="selectWarehouse('${w.id}')">📦 <span class="click-copy" onclick="event.stopPropagation();copyText('${escapeHtml(w.name)}','${escapeHtml(w.name)}')" title="点击复制柜号">${escapeHtml(w.name)}</span>${w.note ? ' · ' + escapeHtml(w.note) : ''}</a></td>
-          <td style="text-align:center">${w.items.length}</td>
+          <td style="text-align:center">${new Set(w.items.map(i => itemGroupKey(i.name))).size}</td>
           <td class="num" style="text-align:right">${total}</td>
           <td><span class="status-badge ${st}">${stText}</span></td>
         </tr>
@@ -1195,18 +1279,20 @@ function renderWarehouseOverview() {
 
 function renderItemDistribution(pool) {
   // 物品跨仓库分布（按总件数排序）—— pool 外部传入时跟随批次，不传则默认全部
+  // 同名但仅末尾编号不同的物品（如 xxx-921 / xxx-846）归为一类展示
   pool = pool || state.warehouses;
   const itemDist = {};
   pool.forEach(w => {
     w.items.forEach(item => {
-      const key = item.name.trim();
+      const key = itemGroupKey(item.name);
       if (!key) return;
       if (!itemDist[key]) itemDist[key] = [];
       itemDist[key].push({
         wid: w.id, wname: w.name,
         wstatus: getWarehouseStatus(w),
         batchName: getBatchName(w.batchId),
-        qty: item.qty || 0
+        qty: item.qty || 0,
+        itemName: item.name
       });
     });
   });
@@ -1224,13 +1310,23 @@ function renderItemDistribution(pool) {
   const distStatusOrder = ['half', 'done', 'empty'];
   const distStatusLabel = { half:'🟠 装了一半', done:'🟢 已装完', empty:'⚪ 空的' };
 
-  const itemRows = entries.map(([name, dist], i) => {
-    const total = dist.reduce((s, x) => s + x.qty, 0);
+  const itemRows = entries.map(([name, rawDist], i) => {
+    const total = rawDist.reduce((s, x) => s + x.qty, 0);
     const expanded = state.expandedDist['dist-' + i];
+
+    // 同一仓库内的多条编号合并成一条
+    const byWh = {};
+    rawDist.forEach(d => {
+      if (!byWh[d.wid]) byWh[d.wid] = { ...d, qty: 0, names: [] };
+      byWh[d.wid].qty += d.qty;
+      byWh[d.wid].names.push(d.itemName);
+    });
+    const dist = Object.values(byWh);
+    const whCount = dist.length;
 
     // 仓库名预览（默认前 3 个 tag）
     const distTags = dist.slice(0, 3).map(d =>
-      `<span class="dist-tag">${escapeHtml(d.wname)} ×${d.qty}</span>`
+      `<span class="dist-tag">${escapeHtml(d.wname)} ×${d.qty}${d.names.length > 1 ? '（' + d.names.length + '项）' : ''}</span>`
     ).join('');
     const more = dist.length > 3 ? `<span class="dist-more">+${dist.length - 3}</span>` : '';
 
@@ -1247,10 +1343,11 @@ function renderItemDistribution(pool) {
                 <span class="batch-tag">${escapeHtml(d.batchName)}</span>
               </a>
               <span style="color:#4f46e5;font-weight:600;margin-left:6px">×${d.qty}</span>
+              ${d.names.length > 1 ? `<span style="color:#9ca3af;font-size:11px;margin-left:4px">（${d.names.length} 个编号）</span>` : ''}
             </div>`
           ).join('');
           return `<div style="margin-top:6px">
-            <div class="dist-group-label ${stKey}">${distStatusLabel[stKey]}（${group.length}个）</div>
+            <div class="dist-group-label ${stKey}">${distStatusLabel[stKey]}（${group.length}个仓库）</div>
             ${whLinks}
           </div>`;
         }).join('');
@@ -1263,7 +1360,7 @@ function renderItemDistribution(pool) {
           ${escapeHtml(name)}
         </td>
         <td class="num" style="text-align:right;width:90px">${total}</td>
-        <td style="text-align:center;width:100px;color:#6b7280">${dist.length}</td>
+        <td style="text-align:center;width:100px;color:#6b7280">${whCount}</td>
         <td>${distTags}${more}</td>
       </tr>
       ${expanded ? `<tr><td colspan="4" style="background:#fafbfc;border-top:none;padding:8px 16px 14px">${detailHtml}</td></tr>` : ''}
@@ -1301,6 +1398,60 @@ function toggleSection(name) {
 function scrollToTop() {
   const m = document.getElementById('mainArea');
   if (m) m.scrollTop = 0;
+}
+
+// ========== 物品同名分组：展开 / 合并 ==========
+function toggleItemGroup(gi) {
+  const g = _itemGroups[gi];
+  if (!g) return;
+  const key = g.wid + '|' + g.key;
+  state.expandedItemGroups[key] = !state.expandedItemGroups[key];
+  renderMain();
+}
+
+function doMergeGroup(g) {
+  const wh = state.warehouses.find(w => w.id === g.wid);
+  if (!wh || g.items.length < 2) return 0;
+  const total = g.items.reduce((s, x) => s + x.qty, 0);
+  const idxs = g.items.map(x => x.idx).sort((a, b) => a - b);
+  // 从后往前删，避免下标错位
+  idxs.slice().reverse().forEach(i => wh.items.splice(i, 1));
+  const exist = wh.items.find(i => i.name === g.key);
+  if (exist) exist.qty += total;
+  else wh.items.push({ name: g.key, qty: total });
+  return g.items.length;
+}
+
+function mergeItemGroup(gi) {
+  const g = _itemGroups[gi];
+  if (!g || g.items.length < 2) return;
+  const total = g.items.reduce((s, x) => s + x.qty, 0);
+  const ok = confirm(
+    `把这 ${g.items.length} 条合并为「${g.key}」？\n\n` +
+    `合并后数量：${total}\n\n` +
+    `⚠️ 各条末尾编号（如 -921 / -846）会丢失，建议先导出 JSON 备份。`
+  );
+  if (!ok) return;
+  const n = doMergeGroup(g);
+  saveData();
+  toast(`已合并 ${n} 条 → ${g.key}，共 ${total} 件`);
+  render();
+}
+
+function mergeAllGroups() {
+  const targets = _itemGroups.filter(g => g.items.length > 1);
+  if (targets.length === 0) { toast('没有可合并的物品'); return; }
+  const totalRows = targets.reduce((s, g) => s + g.items.length, 0);
+  const ok = confirm(
+    `共 ${targets.length} 组、${totalRows} 条物品仅末尾编号不同，全部合并？\n\n` +
+    `⚠️ 末尾编号会丢失，建议先导出 JSON 备份。`
+  );
+  if (!ok) return;
+  let merged = 0;
+  targets.forEach(g => { merged += doMergeGroup(g); });
+  saveData();
+  toast(`已合并 ${merged} 条，归并为 ${targets.length} 类`);
+  render();
 }
 
 // ========== 筛选 / 选择 ==========
@@ -1620,7 +1771,7 @@ function exportCSV() {
   const totalWh = pool.length;
   const halfWh = pool.filter(w => getWarehouseStatus(w) === 'half').length;
   const doneWh = pool.filter(w => getWarehouseStatus(w) === 'done').length;
-  const totalItemTypes = new Set(pool.flatMap(w => w.items.map(i => i.name))).size;
+  const totalItemTypes = new Set(pool.flatMap(w => w.items.map(i => itemGroupKey(i.name)))).size;
   const totalItems = pool.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
   rows.push(['📊 统计概览']);
   rows.push(['仓库总数', '装一半', '已装完', '批次数', '种类数', '总件数']);
@@ -1633,7 +1784,8 @@ function exportCSV() {
   pool.forEach(w => {
     const qty = w.items.reduce((s, i) => s + (i.qty || 0), 0);
     const st = getWarehouseStatus(w) === 'empty' ? '空' : ({ half:'装一半', done:'已装完' }[w.status] || '-');
-    rows.push([getBatchName(w.batchId), w.name, w.note || '', st, w.items.length, qty]);
+    const typeCnt = new Set(w.items.map(i => itemGroupKey(i.name))).size;
+    rows.push([getBatchName(w.batchId), w.name, w.note || '', st, typeCnt, qty]);
   });
   rows.push(['']);
 
@@ -1647,12 +1799,13 @@ function exportCSV() {
   });
   rows.push(['']);
 
-  // 5. 物品分布（每种物品一行）
+  // 5. 物品分布（同类物品合并成一行，末尾编号只在明细里体现）
   const itemDist = {};
   pool.forEach(w => {
     w.items.forEach(it => {
-      if (!itemDist[it.name]) itemDist[it.name] = [];
-      itemDist[it.name].push({ wname: w.name, batch: getBatchName(w.batchId), qty: it.qty });
+      const key = itemGroupKey(it.name);
+      if (!itemDist[key]) itemDist[key] = [];
+      itemDist[key].push({ wname: w.name, batch: getBatchName(w.batchId), qty: it.qty });
     });
   });
   const sortedEntries = Object.entries(itemDist).sort((a, b) =>
@@ -1660,10 +1813,19 @@ function exportCSV() {
   );
   rows.push(['🔄 物品跨仓库分布']);
   rows.push(['物品名称', '总数', '分布仓库数', '各仓库分布']);
-  sortedEntries.forEach(([name, dist]) => {
-    const total = dist.reduce((s, x) => s + x.qty, 0);
-    const distText = dist.map(d => `${d.batch}·${d.wname}×${d.qty}`).join('；');
-    rows.push([name, total, dist.length, distText]);
+  sortedEntries.forEach(([name, rawDist]) => {
+    const total = rawDist.reduce((s, x) => s + x.qty, 0);
+    // 同一仓库多条编号合并显示
+    const byWh = {};
+    rawDist.forEach(d => {
+      const k = d.batch + '·' + d.wname;
+      if (!byWh[k]) byWh[k] = { batch: d.batch, wname: d.wname, qty: 0, cnt: 0 };
+      byWh[k].qty += d.qty;
+      byWh[k].cnt += 1;
+    });
+    const list = Object.values(byWh);
+    const distText = list.map(d => `${d.batch}·${d.wname}×${d.qty}${d.cnt > 1 ? `(${d.cnt}项)` : ''}`).join('；');
+    rows.push([name, total, list.length, distText]);
   });
 
   // 编码：加 BOM 让 Excel 正确识别 UTF-8 中文
@@ -1718,11 +1880,12 @@ async function exportPNG() {
     if (whs.length === 0) return '';
     const rows = whs.map(w => {
       const qty = w.items.reduce((s, i) => s + (i.qty || 0), 0);
+      const typeCnt = new Set(w.items.map(i => itemGroupKey(i.name))).size;
       const st = getWarehouseStatus(w);
       const stBadge = { empty:'⚪ 空', half:'🟠 装一半', done:'🟢 已装完' }[st];
       return `<tr>
         <td style="padding:6px 12px;border-top:1px solid #f3f4f6">${escapeHtml(w.name)}${w.note?' · '+escapeHtml(w.note):''}</td>
-        <td style="padding:6px 12px;border-top:1px solid #f3f4f6;text-align:center">${w.items.length}</td>
+        <td style="padding:6px 12px;border-top:1px solid #f3f4f6;text-align:center">${typeCnt}</td>
         <td style="padding:6px 12px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5">${qty}</td>
         <td style="padding:6px 12px;border-top:1px solid #f3f4f6;font-size:11px">${stBadge}</td>
       </tr>`;
@@ -1741,11 +1904,11 @@ async function exportPNG() {
     </div>`;
   }).join('');
 
-  // ===== 物品跨仓库分布表 =====
+  // ===== 物品跨仓库分布表（同类物品合并） =====
   const itemDist = {};
   pool.forEach(w => {
     w.items.forEach(item => {
-      const key = item.name.trim();
+      const key = itemGroupKey(item.name);
       if (!key) return;
       if (!itemDist[key]) itemDist[key] = [];
       itemDist[key].push({ wname: w.name, qty: item.qty || 0 });
@@ -1754,10 +1917,17 @@ async function exportPNG() {
   const entries = Object.entries(itemDist).sort((a, b) =>
     b[1].reduce((s, x) => s + x.qty, 0) - a[1].reduce((s, x) => s + x.qty, 0));
 
-  const itemRows = entries.map(([name, dist]) => {
-    const total = dist.reduce((s, x) => s + x.qty, 0);
+  const itemRows = entries.map(([name, rawDist]) => {
+    const total = rawDist.reduce((s, x) => s + x.qty, 0);
+    const byWh = {};
+    rawDist.forEach(d => {
+      if (!byWh[d.wname]) byWh[d.wname] = { wname: d.wname, qty: 0, cnt: 0 };
+      byWh[d.wname].qty += d.qty;
+      byWh[d.wname].cnt += 1;
+    });
+    const dist = Object.values(byWh);
     const tags = dist.slice(0, 4).map(d =>
-      `<span style="display:inline-block;background:#eef2ff;color:#4f46e5;padding:1px 7px;border-radius:8px;font-size:10px;margin-right:3px;margin-bottom:2px">${escapeHtml(d.wname)}×${d.qty}</span>`
+      `<span style="display:inline-block;background:#eef2ff;color:#4f46e5;padding:1px 7px;border-radius:8px;font-size:10px;margin-right:3px;margin-bottom:2px">${escapeHtml(d.wname)}×${d.qty}${d.cnt>1?'('+d.cnt+'项)':''}</span>`
     ).join('');
     const more = dist.length > 4 ? `<span style="color:#9ca3af;font-size:10px">+${dist.length - 4}</span>` : '';
     return `<tr>
@@ -1868,7 +2038,7 @@ function exportVisualReport() {
   const totalWh = pool.length;
   const halfWh = pool.filter(w => getWarehouseStatus(w) === 'half').length;
   const doneWh = pool.filter(w => getWarehouseStatus(w) === 'done').length;
-  const totalItemTypes = new Set(pool.flatMap(w => w.items.map(i => i.name))).size;
+  const totalItemTypes = new Set(pool.flatMap(w => w.items.map(i => itemGroupKey(i.name)))).size;
   const totalItems = pool.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
 
   // 批次分组
@@ -1880,7 +2050,7 @@ function exportVisualReport() {
       const st = getWarehouseStatus(w);
       const stBadge = { empty:'⚪空', half:'🟠装一半', done:'🟢装完' }[st];
       return `<tr><td style="padding:8px 12px;border-top:1px solid #f3f4f6">${escapeHtml(w.name)}${w.note?' · '+escapeHtml(w.note):''}</td>
-        <td style="padding:8px 12px;border-top:1px solid #f3f4f6;text-align:center">${w.items.length}</td>
+        <td style="padding:8px 12px;border-top:1px solid #f3f4f6;text-align:center">${new Set(w.items.map(i => itemGroupKey(i.name))).size}</td>
         <td style="padding:8px 12px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5">${qty}</td>
         <td style="padding:8px 12px;border-top:1px solid #f3f4f6;font-size:12px">${stBadge}</td></tr>`;
     }).join('');
@@ -1890,12 +2060,20 @@ function exportVisualReport() {
     </div>`;
   }).join('');
 
-  // 所有仓库物品卡
+  // 所有仓库物品卡（同类物品合并为一行）
   const allCards = pool.filter(w => w.items.length > 0).map(w => {
-    const items = w.items.map((it, i) =>
+    const gs = [];
+    const gm = {};
+    w.items.forEach(it => {
+      const k = itemGroupKey(it.name);
+      if (!gm[k]) { gm[k] = { name: k, qty: 0, cnt: 0 }; gs.push(gm[k]); }
+      gm[k].qty += (it.qty || 0);
+      gm[k].cnt += 1;
+    });
+    const items = gs.map((g, i) =>
       `<tr><td style="padding:6px 14px;border-top:1px solid #f3f4f6;color:#9ca3af;width:40px">${i+1}</td>
-        <td style="padding:6px 14px;border-top:1px solid #f3f4f6">${escapeHtml(it.name)}</td>
-        <td style="padding:6px 14px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5">${it.qty}</td></tr>`
+        <td style="padding:6px 14px;border-top:1px solid #f3f4f6">${escapeHtml(g.name)}${g.cnt > 1 ? ` <span style="background:#eef2ff;color:#4f46e5;padding:1px 6px;border-radius:8px;font-size:10px">${g.cnt} 个编号</span>` : ''}</td>
+        <td style="padding:6px 14px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5">${g.qty}</td></tr>`
     ).join('');
     const qty = w.items.reduce((s, i) => s + (i.qty || 0), 0);
     return `<div style="background:white;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,0.06);padding:14px 18px;margin-bottom:12px">
@@ -1903,7 +2081,7 @@ function exportVisualReport() {
         <div style="font-size:14px;font-weight:600;color:#111827">📦 ${escapeHtml(w.name)}
           <span style="background:#eef2ff;color:#4f46e5;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px">${escapeHtml(getBatchName(w.batchId))}</span>
         </div>
-        <div style="font-size:12px;color:#6b7280">${w.items.length} 种 · ${qty} 件</div>
+        <div style="font-size:12px;color:#6b7280">${gs.length} 种 · ${qty} 件</div>
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="background:#f9fafb">
         <th style="text-align:left;padding:6px 14px;color:#6b7280;font-weight:600;font-size:12px;width:40px">#</th>
@@ -1913,22 +2091,31 @@ function exportVisualReport() {
     </div>`;
   }).join('');
 
-  // 物品分布汇总
+  // 物品分布汇总（同类物品合并）
   const itemDist = {};
   pool.forEach(w => {
     w.items.forEach(it => {
-      if (!itemDist[it.name]) itemDist[it.name] = [];
-      itemDist[it.name].push({ wname: w.name, batch: getBatchName(w.batchId), qty: it.qty });
+      const k = itemGroupKey(it.name);
+      if (!itemDist[k]) itemDist[k] = [];
+      itemDist[k].push({ wname: w.name, batch: getBatchName(w.batchId), qty: it.qty });
     });
   });
   const distRows = Object.entries(itemDist).sort((a, b) =>
     b[1].reduce((s, x) => s + x.qty, 0) - a[1].reduce((s, x) => s + x.qty, 0)
-  ).map(([name, dist]) => {
-    const total = dist.reduce((s, x) => s + x.qty, 0);
-    const parts = dist.map(d => `${d.batch}·${d.wname}×${d.qty}`);
+  ).map(([name, rawDist]) => {
+    const total = rawDist.reduce((s, x) => s + x.qty, 0);
+    const byWh = {};
+    rawDist.forEach(d => {
+      const k = d.batch + '·' + d.wname;
+      if (!byWh[k]) byWh[k] = { batch: d.batch, wname: d.wname, qty: 0, cnt: 0 };
+      byWh[k].qty += d.qty;
+      byWh[k].cnt += 1;
+    });
+    const list = Object.values(byWh);
+    const parts = list.map(d => `${d.batch}·${d.wname}×${d.qty}${d.cnt > 1 ? `(${d.cnt}项)` : ''}`);
     return `<tr><td style="padding:8px 12px;border-top:1px solid #f3f4f6">${escapeHtml(name)}</td>
       <td style="padding:8px 12px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5">${total}</td>
-      <td style="padding:8px 12px;border-top:1px solid #f3f4f6;text-align:center">${dist.length}</td>
+      <td style="padding:8px 12px;border-top:1px solid #f3f4f6;text-align:center">${list.length}</td>
       <td style="padding:8px 12px;border-top:1px solid #f3f4f6;color:#6b7280;font-size:12px">${escapeHtml(parts.join(' · '))}</td></tr>`;
   }).join('') || '<tr><td colspan="4" style="padding:16px;text-align:center;color:#9ca3af">暂无数据</td></tr>';
 
