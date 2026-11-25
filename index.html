@@ -559,6 +559,10 @@
         <div class="num" id="statEmpty">0</div>
         <div class="label">空仓库</div>
       </div>
+      <div class="stat-card qty">
+        <div class="num" id="statQty">0</div>
+        <div class="label">总件数</div>
+      </div>
     </div>
 
     <div class="search-box">
@@ -1054,18 +1058,21 @@ function renderStats() {
     pool = pool.filter(w => w.batchId === state.selectedBatch);
   }
   const total = pool.length;
-  let done = 0, half = 0, empty = 0;
+  let done = 0, half = 0, empty = 0, totalQty = 0;
   pool.forEach(w => {
     const st = getWarehouseStatus(w);
     if (st === 'done') done++;
     else if (st === 'half') half++;
     else empty++;
+    w.items.forEach(i => { totalQty += (i.qty || 0); });
   });
   document.getElementById('statTotal').textContent = total;
   document.getElementById('statDone').textContent = done;
   document.getElementById('statHalf').textContent = half;
   const elEmpty = document.getElementById('statEmpty');
   if (elEmpty) elEmpty.textContent = empty;
+  const elQty = document.getElementById('statQty');
+  if (elQty) elQty.textContent = totalQty;
 }
 
 function renderBatchChips() {
@@ -1247,13 +1254,14 @@ function renderMain() {
     const half = pool.filter(w => getWarehouseStatus(w) === 'half').length;
     const done = pool.filter(w => getWarehouseStatus(w) === 'done').length;
     const empty = pool.filter(w => getWarehouseStatus(w) === 'empty').length;
+    const totalQty = pool.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
 
     main.innerHTML = `
       <div class="main-header">
         <div>
           <h2>📦 ${escapeHtml(batchLabel)}</h2>
           <div style="font-size:13px;color:#6b7280;margin-top:4px">
-            ${pool.length} 个仓库 · 🟢${done} 装完 · 🟠${half} 装一半 · ⚪${empty} 空
+            ${pool.length} 个仓库 · <b style="color:#4f46e5">共 ${totalQty} 件</b> · 🟢${done} 装完 · 🟠${half} 装一半 · ⚪${empty} 空
           </div>
         </div>
       </div>
