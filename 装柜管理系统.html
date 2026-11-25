@@ -1626,44 +1626,54 @@ function exportCSV() {
   const dateStr = new Date().toISOString().slice(0, 10);
   const rows = [];
 
+  // pool 跟随当前选中批次（选"全部"才看所有）
+  let pool = state.warehouses;
+  let visibleBatches = state.batches;
+  let batchLabel = '全部批次';
+  if (state.selectedBatch !== 'all') {
+    pool = pool.filter(w => w.batchId === state.selectedBatch);
+    visibleBatches = state.batches.filter(b => b.id === state.selectedBatch);
+    batchLabel = getBatchName(state.selectedBatch);
+  }
+
   // 1. 标题
-  rows.push(['装柜数据报表', '生成时间', new Date().toLocaleString('zh-CN')]);
+  rows.push(['装柜数据报表', '批次', batchLabel, '生成时间', new Date().toLocaleString('zh-CN')]);
   rows.push(['']); // 空行
 
   // 2. 统计概览
-  const totalWh = state.warehouses.length;
-  const halfWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'half').length;
-  const doneWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'done').length;
-  const totalItemTypes = new Set(state.warehouses.flatMap(w => w.items.map(i => i.name))).size;
-  const totalItems = state.warehouses.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
+  const totalWh = pool.length;
+  const halfWh = pool.filter(w => getWarehouseStatus(w) === 'half').length;
+  const doneWh = pool.filter(w => getWarehouseStatus(w) === 'done').length;
+  const totalItemTypes = new Set(pool.flatMap(w => w.items.map(i => i.name))).size;
+  const totalItems = pool.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
   rows.push(['📊 统计概览']);
   rows.push(['仓库总数', '装一半', '已装完', '批次数', '种类数', '总件数']);
-  rows.push([totalWh, halfWh, doneWh, state.batches.length, totalItemTypes, totalItems]);
+  rows.push([totalWh, halfWh, doneWh, visibleBatches.length, totalItemTypes, totalItems]);
   rows.push(['']);
 
   // 3. 仓库汇总（每个仓库一行）
   rows.push(['📦 仓库汇总']);
   rows.push(['批次', '仓库/柜号', '备注', '状态', '种类数', '总件数']);
-  state.warehouses.forEach(w => {
+  pool.forEach(w => {
     const qty = w.items.reduce((s, i) => s + (i.qty || 0), 0);
-    const st = w.items.length === 0 ? '空' : ({ half:'装一半', done:'已装完' }[w.status] || '-');
+    const st = getWarehouseStatus(w) === 'empty' ? '空' : ({ half:'装一半', done:'已装完' }[w.status] || '-');
     rows.push([getBatchName(w.batchId), w.name, w.note || '', st, w.items.length, qty]);
   });
   rows.push(['']);
 
-  // 4. 物品明细（每个物品一行，前面重复批次+仓库，Excel 筛选好用）
+  // 4. 物品明细（每个物品一行）
   rows.push(['📋 物品明细']);
   rows.push(['批次', '仓库/柜号', '物品名称', '数量']);
-  state.warehouses.forEach(w => {
+  pool.forEach(w => {
     w.items.forEach(it => {
       rows.push([getBatchName(w.batchId), w.name, it.name, it.qty]);
     });
   });
   rows.push(['']);
 
-  // 5. 物品分布（每种物品一行，显示跨仓库分布）
+  // 5. 物品分布（每种物品一行）
   const itemDist = {};
-  state.warehouses.forEach(w => {
+  pool.forEach(w => {
     w.items.forEach(it => {
       if (!itemDist[it.name]) itemDist[it.name] = [];
       itemDist[it.name].push({ wname: w.name, batch: getBatchName(w.batchId), qty: it.qty });
@@ -1687,10 +1697,10 @@ function exportCSV() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `装柜数据_${dateStr}.csv`;
+  a.download = `装柜数据_${batchLabel}_${dateStr}.csv`;
   a.click();
   URL.revokeObjectURL(url);
-  toast('CSV 已导出');
+  toast('CSV 已导出（' + batchLabel + '）');
 }
 function csvCell(v) {
   const s = v === null || v === undefined ? '' : String(v);
@@ -1710,15 +1720,25 @@ async function exportPNG() {
   const dateStr = new Date().toISOString().slice(0, 10);
   const now = new Date().toLocaleString('zh-CN');
 
-  const totalWh = state.warehouses.length;
-  const halfWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'half').length;
-  const doneWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'done').length;
-  const emptyWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'empty').length;
-  const totalItems = state.warehouses.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
+  // pool 跟随当前选中批次
+  let pool = state.warehouses;
+  let visibleBatches = state.batches;
+  let batchLabel = '全部批次';
+  if (state.selectedBatch !== 'all') {
+    pool = pool.filter(w => w.batchId === state.selectedBatch);
+    visibleBatches = state.batches.filter(b => b.id === state.selectedBatch);
+    batchLabel = getBatchName(state.selectedBatch);
+  }
+
+  const totalWh = pool.length;
+  const halfWh = pool.filter(w => getWarehouseStatus(w) === 'half').length;
+  const doneWh = pool.filter(w => getWarehouseStatus(w) === 'done').length;
+  const emptyWh = pool.filter(w => getWarehouseStatus(w) === 'empty').length;
+  const totalItems = pool.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
 
   // ===== 仓库汇总表（按批次分组，一个仓库一行） =====
-  const whSections = state.batches.map(b => {
-    const whs = state.warehouses.filter(w => w.batchId === b.id);
+  const whSections = visibleBatches.map(b => {
+    const whs = pool.filter(w => w.batchId === b.id);
     if (whs.length === 0) return '';
     const rows = whs.map(w => {
       const qty = w.items.reduce((s, i) => s + (i.qty || 0), 0);
@@ -1747,7 +1767,7 @@ async function exportPNG() {
 
   // ===== 物品跨仓库分布表 =====
   const itemDist = {};
-  state.warehouses.forEach(w => {
+  pool.forEach(w => {
     w.items.forEach(item => {
       const key = item.name.trim();
       if (!key) return;
@@ -1777,7 +1797,7 @@ async function exportPNG() {
   font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
   background:#f0f2f5;color:#1f2937;
   width:900px;padding:24px 28px;line-height:1.4;">
-  <div style="font-size:22px;font-weight:700;color:#111827;margin-bottom:4px">📦 装柜数据报表</div>
+  <div style="font-size:22px;font-weight:700;color:#111827;margin-bottom:4px">📦 装柜数据报表 · ${escapeHtml(batchLabel)}</div>
   <div style="color:#6b7280;font-size:12px;margin-bottom:18px">${now}</div>
 
   <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:18px">
@@ -1841,10 +1861,10 @@ async function exportPNG() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `装柜数据_${dateStr}.png`;
+      a.download = `装柜数据_${batchLabel}_${dateStr}.png`;
       a.click();
       URL.revokeObjectURL(url);
-      toast('图片已导出');
+      toast('图片已导出（' + batchLabel + '）');
     }, 'image/png');
   } catch(err) {
     toast('图片生成失败: ' + (err.message || '未知错误'));
@@ -1859,15 +1879,25 @@ function exportVisualReport() {
   const dateStr = now.toISOString().slice(0, 10);
   const timeStr = now.toLocaleString('zh-CN');
 
-  const totalWh = state.warehouses.length;
-  const halfWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'half').length;
-  const doneWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'done').length;
-  const totalItemTypes = new Set(state.warehouses.flatMap(w => w.items.map(i => i.name))).size;
-  const totalItems = state.warehouses.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
+  // pool 跟随当前选中批次
+  let pool = state.warehouses;
+  let visibleBatches = state.batches;
+  let batchLabel = '全部批次';
+  if (state.selectedBatch !== 'all') {
+    pool = pool.filter(w => w.batchId === state.selectedBatch);
+    visibleBatches = state.batches.filter(b => b.id === state.selectedBatch);
+    batchLabel = getBatchName(state.selectedBatch);
+  }
+
+  const totalWh = pool.length;
+  const halfWh = pool.filter(w => getWarehouseStatus(w) === 'half').length;
+  const doneWh = pool.filter(w => getWarehouseStatus(w) === 'done').length;
+  const totalItemTypes = new Set(pool.flatMap(w => w.items.map(i => i.name))).size;
+  const totalItems = pool.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
 
   // 批次分组
-  const batchGroups = state.batches.map(b => {
-    const whs = state.warehouses.filter(w => w.batchId === b.id);
+  const batchGroups = visibleBatches.map(b => {
+    const whs = pool.filter(w => w.batchId === b.id);
     if (whs.length === 0) return '';
     const whRows = whs.map(w => {
       const qty = w.items.reduce((s, i) => s + (i.qty || 0), 0);
@@ -1885,7 +1915,7 @@ function exportVisualReport() {
   }).join('');
 
   // 所有仓库物品卡
-  const allCards = state.warehouses.filter(w => w.items.length > 0).map(w => {
+  const allCards = pool.filter(w => w.items.length > 0).map(w => {
     const items = w.items.map((it, i) =>
       `<tr><td style="padding:6px 14px;border-top:1px solid #f3f4f6;color:#9ca3af;width:40px">${i+1}</td>
         <td style="padding:6px 14px;border-top:1px solid #f3f4f6">${escapeHtml(it.name)}</td>
@@ -1909,7 +1939,7 @@ function exportVisualReport() {
 
   // 物品分布汇总
   const itemDist = {};
-  state.warehouses.forEach(w => {
+  pool.forEach(w => {
     w.items.forEach(it => {
       if (!itemDist[it.name]) itemDist[it.name] = [];
       itemDist[it.name].push({ wname: w.name, batch: getBatchName(w.batchId), qty: it.qty });
@@ -1928,7 +1958,7 @@ function exportVisualReport() {
 
   const html = `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
-<title>装柜数据报表 · ${dateStr}</title>
+<title>装柜数据报表 · ${batchLabel} · ${dateStr}</title>
 <style>
   body { font-family: -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
          background:#f0f2f5; color:#1f2937; padding:32px 40px; max-width:1100px; margin:0 auto; }
@@ -1975,27 +2005,37 @@ ${allCards || '<div style="color:#9ca3af;font-size:13px;margin-bottom:24px">暂�
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `装柜数据报表_${dateStr}.html`;
+  a.download = `装柜数据报表_${batchLabel}_${dateStr}.html`;
   a.click();
   URL.revokeObjectURL(url);
-  toast('可视报表已导出');
+  toast('可视报表已导出（' + batchLabel + '）');
 }
 
 function exportData() {
+  // JSON 导出也跟随当前选中批次
+  let pool = state.warehouses;
+  let visibleBatches = state.batches;
+  let batchLabel = '全部批次';
+  if (state.selectedBatch !== 'all') {
+    pool = pool.filter(w => w.batchId === state.selectedBatch);
+    visibleBatches = state.batches.filter(b => b.id === state.selectedBatch);
+    batchLabel = getBatchName(state.selectedBatch);
+  }
   const data = {
     version: 2,
     exportedAt: new Date().toISOString(),
-    batches: state.batches,
-    warehouses: state.warehouses
+    batchLabel,
+    batches: visibleBatches,
+    warehouses: pool
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `装柜数据_${new Date().toISOString().slice(0,10)}.json`;
+  a.download = `装柜数据_${batchLabel}_${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
-  toast('JSON 已导出');
+  toast('JSON 已导出（' + batchLabel + '）');
 }
 
 function importData(e) {
