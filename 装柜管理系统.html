@@ -668,7 +668,7 @@ let state = {
   warehouses: [],         // [{id, name, batchId, note, status, items:[{name, qty}]}]
   selectedId: null,
   filter: 'all',          // all | half | done | empty
-  selectedBatch: 'all',   // all | batchId
+  selectedBatch: '',       // '' = 未选（等用户选）| batchId
   searchKw: '',
   selectedWIds: new Set(),
   expandedDist: {},       // {dist-i: true}
@@ -722,6 +722,11 @@ function loadData() {
     }
   }
   ensureDataIntegrity();
+  // 自动选一个批次（优先选有仓库的，没选过就选第一个）
+  if (!state.selectedBatch || state.selectedBatch === '') {
+    const firstWithWh = state.batches.find(b => b.id !== DEFAULT_BATCH.id && state.warehouses.some(w => w.batchId === b.id));
+    state.selectedBatch = firstWithWh ? firstWithWh.id : (state.batches.find(b => b.id !== DEFAULT_BATCH.id)?.id || DEFAULT_BATCH.id);
+  }
   // 写回本地（迁移成功就顺便升版）
   localStorage.setItem(STORAGE_KEY_V2, JSON.stringify({
     batches: state.batches,
@@ -888,7 +893,7 @@ function getFilteredWarehouses() {
   let list = state.warehouses.slice();
 
   // 批次筛选
-  if (state.selectedBatch !== 'all') {
+  if (state.selectedBatch !== '') {
     list = list.filter(w => w.batchId === state.selectedBatch);
   }
   // 状态筛选
@@ -928,7 +933,7 @@ function render() {
 function renderStats() {
   // 统计跟随当前选中的批次（不是全部仓库），但不受状态筛选/搜索词影响
   let pool = state.warehouses;
-  if (state.selectedBatch !== 'all') {
+  if (state.selectedBatch !== '') {
     pool = pool.filter(w => w.batchId === state.selectedBatch);
   }
   const total = pool.length;
@@ -948,15 +953,12 @@ function renderStats() {
 
 function renderBatchChips() {
   const el = document.getElementById('batchChips');
-  const allBadge = state.selectedBatch === 'all' ? 'active' : '';
-  el.innerHTML = `
-    <div class="batch-chip ${allBadge}" onclick="setBatch('all')">全部 (${state.warehouses.length})</div>
-    ${state.batches.map(b => {
-      const cnt = state.warehouses.filter(w => w.batchId === b.id).length;
-      const act = state.selectedBatch === b.id ? 'active' : '';
-      return `<div class="batch-chip ${act}" onclick="setBatch('${b.id}')">${escapeHtml(b.name)} (${cnt})</div>`;
-    }).join('')}
-  `;
+  // 去掉"全部"chip，只显示具体批次，强制必须选一个
+  el.innerHTML = state.batches.map(b => {
+    const cnt = state.warehouses.filter(w => w.batchId === b.id).length;
+    const act = state.selectedBatch === b.id ? 'active' : '';
+    return `<div class="batch-chip ${act}" onclick="setBatch('${b.id}')">${escapeHtml(b.name)} (${cnt})</div>`;
+  }).join('');
 }
 
 function renderStatusFilters() {
@@ -964,7 +966,7 @@ function renderStatusFilters() {
   if (!el) return;
   // 数量统计：跟随当前批次，但不受状态筛选/搜索词影响（不然数字乱跳）
   let pool = state.warehouses;
-  if (state.selectedBatch !== 'all') {
+  if (state.selectedBatch !== '') {
     pool = pool.filter(w => w.batchId === state.selectedBatch);
   }
   let all = pool.length, empty = 0, half = 0, done = 0;
@@ -1052,61 +1054,24 @@ function renderMain() {
   const wh = state.warehouses.find(w => w.id === state.selectedId);
 
   if (!wh) {
-    // ===== 全局一览模式 =====
-    // pool 跟随选中批次（和左侧统计/筛选一致），选"全部"才看所有仓库
+    // ===== 未选仓库：简洁空状态，砍掉全局概览 =====
     let pool = state.warehouses;
-    if (state.selectedBatch !== 'all') {
+    if (state.selectedBatch !== '') {
       pool = pool.filter(w => w.batchId === state.selectedBatch);
     }
-    const totalWh = pool.length;
-    const halfWh = pool.filter(w => getWarehouseStatus(w) === 'half').length;
-    const doneWh = pool.filter(w => getWarehouseStatus(w) === 'done').length;
-    const emptyWh = pool.filter(w => getWarehouseStatus(w) === 'empty').length;
-    const totalItems = pool.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
-    const typeCount = new Set(pool.flatMap(w => w.items.map(i => i.name))).size;
-    const batchLabel = state.selectedBatch === 'all' ? '全部批次' : getBatchName(state.selectedBatch);
+    const batchLabel = state.selectedBatch === '' ? '全部批次' : getBatchName(state.selectedBatch);
+    const half = pool.filter(w => getWarehouseStatus(w) === 'half').length;
+    const done = pool.filter(w => getWarehouseStatus(w) === 'done').length;
+    const empty = pool.filter(w => getWarehouseStatus(w) === 'empty').length;
 
     main.innerHTML = `
-      <div class="main-header">
-        <div>
-          <h2>📊 ${escapeHtml(batchLabel)} · 概览</h2>
-          <div style="font-size:13px;color:#6b7280;margin-top:4px">
-            点击左侧仓库查看详情 · 再点一次取消选中
-          </div>
+      <div class="empty-state" style="padding:40px 20px">
+        <div class="big-icon">📦</div>
+        <h2 style="font-size:18px;margin-bottom:6px;color:#111827">${escapeHtml(batchLabel)}</h2>
+        <div style="color:#6b7280;font-size:13px;margin-bottom:16px">
+          ${pool.length} 个仓库 · 🟢${done} 装完 · 🟠${half} 装一半 · ⚪${empty} 空
         </div>
-      </div>
-
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:20px">
-        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-          <div style="font-size:22px;font-weight:700;color:#4f46e5">${totalWh}</div>
-          <div style="font-size:11px;color:#6b7280;margin-top:2px">仓库总数</div>
-        </div>
-        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-          <div style="font-size:22px;font-weight:700;color:#059669">${doneWh}</div>
-          <div style="font-size:11px;color:#6b7280;margin-top:2px">已装完</div>
-        </div>
-        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-          <div style="font-size:22px;font-weight:700;color:#d97706">${halfWh}</div>
-          <div style="font-size:11px;color:#6b7280;margin-top:2px">装了一半</div>
-        </div>
-        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-          <div style="font-size:22px;font-weight:700;color:#9ca3af">${emptyWh}</div>
-          <div style="font-size:11px;color:#6b7280;margin-top:2px">空仓库</div>
-        </div>
-        <div style="background:white;border-radius:10px;padding:12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)">
-          <div style="font-size:22px;font-weight:700;color:#4f46e5">${totalItems}</div>
-          <div style="font-size:11px;color:#6b7280;margin-top:2px">总件数 · ${typeCount} 种</div>
-        </div>
-      </div>
-
-      <div class="global-summary">
-        <h3 class="collapsible" onclick="toggleSection('dist')">
-          <span class="chevron">${state.collapsed.dist ? '▶' : '▼'}</span>
-          📋 物品跨仓库分布（点击物品行展开看在哪些仓库里）
-        </h3>
-        <div class="${state.collapsed.dist ? 'collapsed-body' : ''}">
-          ${renderItemDistribution(pool)}
-        </div>
+        <p style="color:#9ca3af;font-size:13px">👈 点击左侧仓库查看详情和编辑</p>
       </div>
     `;
     return;
@@ -1436,7 +1401,7 @@ function openWarehouseModal(id) {
     title.textContent = '新建仓库';
     nameInput.value = '';
     noteInput.value = '';
-    batchSel.value = state.selectedBatch !== 'all' ? state.selectedBatch : DEFAULT_BATCH.id;
+    batchSel.value = state.selectedBatch !== '' ? state.selectedBatch : DEFAULT_BATCH.id;
   }
   modal.classList.add('show');
   setTimeout(() => nameInput.focus(), 100);
@@ -1629,8 +1594,8 @@ function exportCSV() {
   // pool 跟随当前选中批次（选"全部"才看所有）
   let pool = state.warehouses;
   let visibleBatches = state.batches;
-  let batchLabel = '全部批次';
-  if (state.selectedBatch !== 'all') {
+  let batchLabel = state.selectedBatch ? getBatchName(state.selectedBatch) : '全部批次';
+  if (state.selectedBatch !== '') {
     pool = pool.filter(w => w.batchId === state.selectedBatch);
     visibleBatches = state.batches.filter(b => b.id === state.selectedBatch);
     batchLabel = getBatchName(state.selectedBatch);
@@ -1723,8 +1688,8 @@ async function exportPNG() {
   // pool 跟随当前选中批次
   let pool = state.warehouses;
   let visibleBatches = state.batches;
-  let batchLabel = '全部批次';
-  if (state.selectedBatch !== 'all') {
+  let batchLabel = state.selectedBatch ? getBatchName(state.selectedBatch) : '全部批次';
+  if (state.selectedBatch !== '') {
     pool = pool.filter(w => w.batchId === state.selectedBatch);
     visibleBatches = state.batches.filter(b => b.id === state.selectedBatch);
     batchLabel = getBatchName(state.selectedBatch);
@@ -1882,8 +1847,8 @@ function exportVisualReport() {
   // pool 跟随当前选中批次
   let pool = state.warehouses;
   let visibleBatches = state.batches;
-  let batchLabel = '全部批次';
-  if (state.selectedBatch !== 'all') {
+  let batchLabel = state.selectedBatch ? getBatchName(state.selectedBatch) : '全部批次';
+  if (state.selectedBatch !== '') {
     pool = pool.filter(w => w.batchId === state.selectedBatch);
     visibleBatches = state.batches.filter(b => b.id === state.selectedBatch);
     batchLabel = getBatchName(state.selectedBatch);
@@ -2015,8 +1980,8 @@ function exportData() {
   // JSON 导出也跟随当前选中批次
   let pool = state.warehouses;
   let visibleBatches = state.batches;
-  let batchLabel = '全部批次';
-  if (state.selectedBatch !== 'all') {
+  let batchLabel = state.selectedBatch ? getBatchName(state.selectedBatch) : '全部批次';
+  if (state.selectedBatch !== '') {
     pool = pool.filter(w => w.batchId === state.selectedBatch);
     visibleBatches = state.batches.filter(b => b.id === state.selectedBatch);
     batchLabel = getBatchName(state.selectedBatch);
