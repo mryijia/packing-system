@@ -1053,17 +1053,23 @@ function renderMain() {
 
   if (!wh) {
     // ===== 全局一览模式 =====
-    const totalWh = state.warehouses.length;
-    const halfWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'half').length;
-    const doneWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'done').length;
-    const emptyWh = state.warehouses.filter(w => getWarehouseStatus(w) === 'empty').length;
-    const totalItems = state.warehouses.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
-    const typeCount = new Set(state.warehouses.flatMap(w => w.items.map(i => i.name))).size;
+    // pool 跟随选中批次（和左侧统计/筛选一致），选"全部"才看所有仓库
+    let pool = state.warehouses;
+    if (state.selectedBatch !== 'all') {
+      pool = pool.filter(w => w.batchId === state.selectedBatch);
+    }
+    const totalWh = pool.length;
+    const halfWh = pool.filter(w => getWarehouseStatus(w) === 'half').length;
+    const doneWh = pool.filter(w => getWarehouseStatus(w) === 'done').length;
+    const emptyWh = pool.filter(w => getWarehouseStatus(w) === 'empty').length;
+    const totalItems = pool.reduce((s, w) => s + w.items.reduce((a, i) => a + (i.qty || 0), 0), 0);
+    const typeCount = new Set(pool.flatMap(w => w.items.map(i => i.name))).size;
+    const batchLabel = state.selectedBatch === 'all' ? '全部批次' : getBatchName(state.selectedBatch);
 
     main.innerHTML = `
       <div class="main-header">
         <div>
-          <h2>📊 全局一览</h2>
+          <h2>📊 ${escapeHtml(batchLabel)} · 概览</h2>
           <div style="font-size:13px;color:#6b7280;margin-top:4px">
             点击左侧仓库查看详情 · 再点一次取消选中
           </div>
@@ -1099,7 +1105,7 @@ function renderMain() {
           📋 物品跨仓库分布（点击物品行展开看在哪些仓库里）
         </h3>
         <div class="${state.collapsed.dist ? 'collapsed-body' : ''}">
-          ${renderItemDistribution()}
+          ${renderItemDistribution(pool)}
         </div>
       </div>
     `;
@@ -1211,10 +1217,11 @@ function renderWarehouseOverview() {
   return grouped || '<div class="wh-empty">还没有任何仓库数据</div>';
 }
 
-function renderItemDistribution() {
-  // 物品跨仓库分布（按总件数排序）
+function renderItemDistribution(pool) {
+  // 物品跨仓库分布（按总件数排序）—— pool 外部传入时跟随批次，不传则默认全部
+  pool = pool || state.warehouses;
   const itemDist = {};
-  state.warehouses.forEach(w => {
+  pool.forEach(w => {
     w.items.forEach(item => {
       const key = item.name.trim();
       if (!key) return;
