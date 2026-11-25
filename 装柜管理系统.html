@@ -926,9 +926,9 @@ function splitQty(total, n) {
   return arr;
 }
 
-// 某仓库内"物品条目"的分组键（独立条目各自成组，不参与同类合并）
+// 某仓库内"物品条目"的分组键（仅末尾编号不同的归为同一类，默认折叠展示）
 function itemKeyOf(w, item, idx) {
-  return item.independent ? 'ind:' + w.id + ':' + idx : itemGroupKey(item.name);
+  return itemGroupKey(item.name);
 }
 
 // 统计某仓库的物品"种类"数
@@ -937,15 +937,13 @@ function countItemTypes(w) {
 }
 
 // 往仓库写入一条物品（同名则累加数量）
-function upsertItem(wh, name, qty, independent) {
+function upsertItem(wh, name, qty) {
   const exist = wh.items.find(i => i.name === name);
   if (exist) {
     exist.qty += qty;
-    if (independent) exist.independent = true;
     return exist;
   }
   const it = { name, qty };
-  if (independent) it.independent = true;
   wh.items.push(it);
   return it;
 }
@@ -1182,20 +1180,19 @@ function renderMain() {
   const st = getWarehouseStatus(wh);
   const stText = { empty:'空', half:'装了一半', done:'已装完' }[st];
 
-  // 按「去掉末尾编号」分组：同一物品不同编号合并显示成一行
-  // 标记了 independent 的条目（由多编号拆分而来）各自独立成行
+  // 按「去掉末尾编号」分组：同一物品不同编号合并显示成一行（默认折叠）
   const groups = [];
   const gmap = {};
   wh.items.forEach((item, idx) => {
-    const key = item.independent ? 'ind:' + idx : itemGroupKey(item.name);
-    if (!gmap[key]) { gmap[key] = { key, items: [], independent: !!item.independent }; groups.push(gmap[key]); }
+    const key = itemGroupKey(item.name);
+    if (!gmap[key]) { gmap[key] = { key, items: [] }; groups.push(gmap[key]); }
     gmap[key].items.push({ idx, name: item.name, qty: item.qty || 0 });
   });
   _itemGroups = groups.map(g => ({ ...g, wid: wh.id }));
   const typeCount = groups.length;          // 去重后的物品种类
-  const mergeableGroups = groups.filter(g => g.items.length > 1 && !g.independent);
+  const mergeableGroups = groups.filter(g => g.items.length > 1);
   const mergeableCount = mergeableGroups.length;
-  const multiItems = wh.items.filter(it => !it.independent && isMultiCode(it.name));
+  const multiItems = wh.items.filter(it => isMultiCode(it.name));
 
   main.innerHTML = `
     <div class="main-header">
@@ -1256,7 +1253,7 @@ function renderMain() {
             // 只有一条：普通行
             if (g.items.length === 1) {
               const it = g.items[0];
-              const canSplit = !g.independent && isMultiCode(it.name);
+              const canSplit = isMultiCode(it.name);
               return `
                 <tr>
                   <td style="color:#9ca3af">${gi + 1}</td>
@@ -1362,7 +1359,7 @@ function renderItemDistribution(pool) {
     w.items.forEach((item, idx) => {
       const key = itemKeyOf(w, item, idx);
       if (!key) return;
-      if (!itemDist[key]) itemDist[key] = { name: item.independent ? item.name.trim() : key, list: [] };
+      if (!itemDist[key]) itemDist[key] = { name: key, list: [] };
       itemDist[key].list.push({
         wid: w.id, wname: w.name,
         wstatus: getWarehouseStatus(w),
@@ -1515,7 +1512,7 @@ function mergeItemGroup(gi) {
 }
 
 function mergeAllGroups() {
-  const targets = _itemGroups.filter(g => g.items.length > 1 && !g.independent);
+  const targets = _itemGroups.filter(g => g.items.length > 1);
   if (targets.length === 0) { toast('没有可合并的物品'); return; }
   const totalRows = targets.reduce((s, g) => s + g.items.length, 0);
   const ok = confirm(
@@ -1547,7 +1544,7 @@ function splitOneItem(idx) {
   if (!ok) return;
   const qtys = splitQty(total, parts.length);
   wh.items.splice(idx, 1);
-  parts.forEach((p, i) => upsertItem(wh, p, qtys[i], true));
+  parts.forEach((p, i) => upsertItem(wh, p, qtys[i]));
   saveData();
   toast(`已拆分为 ${parts.length} 条物品`);
   render();
@@ -1557,7 +1554,7 @@ function splitOneItem(idx) {
 function splitAllMultiItems() {
   const wh = state.warehouses.find(w => w.id === state.selectedId);
   if (!wh) return;
-  const targets = wh.items.filter(it => !it.independent && isMultiCode(it.name));
+  const targets = wh.items.filter(it => isMultiCode(it.name));
   if (targets.length === 0) { toast('没有可拆分的物品'); return; }
   const ok = confirm(
     `共 ${targets.length} 条物品含多个编号，全部拆分？\n\n` +
@@ -1569,10 +1566,10 @@ function splitAllMultiItems() {
   targets.forEach(t => { total += splitItemName(t.name).length - 1; });
   const next = [];
   wh.items.forEach(it => {
-    const parts = (!it.independent && isMultiCode(it.name)) ? splitItemName(it.name) : [];
+    const parts = isMultiCode(it.name) ? splitItemName(it.name) : [];
     if (parts.length > 1) {
       const qtys = splitQty(it.qty || 0, parts.length);
-      parts.forEach((p, i) => next.push({ name: p, qty: qtys[i], independent: true }));
+      parts.forEach((p, i) => next.push({ name: p, qty: qtys[i] }));
     } else {
       next.push(it);
     }
@@ -1581,7 +1578,7 @@ function splitAllMultiItems() {
   const out = [];
   const map = {};
   next.forEach(it => {
-    const k = (it.independent ? 'i:' : 'g:') + it.name;
+    const k = it.name;
     if (map[k]) map[k].qty += it.qty;
     else { map[k] = { ...it }; out.push(map[k]); }
   });
@@ -1780,18 +1777,18 @@ function saveItem() {
 
   if (editingItemIdx !== null) {
     // 编辑：若改成多编号，提示用「拆分」而不是在这里自动拆（避免下标错乱）
-    wh.items[editingItemIdx] = { name, qty, independent: wh.items[editingItemIdx].independent };
+    wh.items[editingItemIdx] = { name, qty };
     toast('物品已更新');
   } else {
     const parts = splitItemName(name);
     if (parts.length > 1) {
       // 多编号自动拆成多条独立物品
       const qtys = splitQty(qty, parts.length);
-      parts.forEach((p, i) => upsertItem(wh, p, qtys[i], true));
+      parts.forEach((p, i) => upsertItem(wh, p, qtys[i]));
       toast(`已拆分为 ${parts.length} 条物品`);
     } else {
       const exist = wh.items.find(i => i.name === name);
-      upsertItem(wh, name, qty, false);
+      upsertItem(wh, name, qty);
       toast(exist ? `已合并到 "${name}"，共 ${exist.qty} 件` : '物品已添加');
     }
   }
@@ -1945,7 +1942,7 @@ function exportCSV() {
   pool.forEach(w => {
     w.items.forEach((it, idx) => {
       const key = itemKeyOf(w, it, idx);
-      if (!itemDist[key]) itemDist[key] = { name: it.independent ? it.name.trim() : key, list: [] };
+      if (!itemDist[key]) itemDist[key] = { name: key, list: [] };
       itemDist[key].list.push({ wname: w.name, batch: getBatchName(w.batchId), qty: it.qty });
     });
   });
@@ -2051,7 +2048,7 @@ async function exportPNG() {
     w.items.forEach((item, idx) => {
       const key = itemKeyOf(w, item, idx);
       if (!key) return;
-      if (!itemDist[key]) itemDist[key] = { name: item.independent ? item.name.trim() : key, list: [] };
+      if (!itemDist[key]) itemDist[key] = { name: key, list: [] };
       itemDist[key].list.push({ wname: w.name, qty: item.qty || 0 });
     });
   });
@@ -2207,7 +2204,7 @@ function exportVisualReport() {
     const gm = {};
     w.items.forEach((it, idx) => {
       const k = itemKeyOf(w, it, idx);
-      if (!gm[k]) { gm[k] = { name: it.independent ? it.name.trim() : k, qty: 0, cnt: 0 }; gs.push(gm[k]); }
+      if (!gm[k]) { gm[k] = { name: k, qty: 0, cnt: 0 }; gs.push(gm[k]); }
       gm[k].qty += (it.qty || 0);
       gm[k].cnt += 1;
     });
@@ -2237,7 +2234,7 @@ function exportVisualReport() {
   pool.forEach(w => {
     w.items.forEach((it, idx) => {
       const k = itemKeyOf(w, it, idx);
-      if (!itemDist[k]) itemDist[k] = { name: it.independent ? it.name.trim() : k, list: [] };
+      if (!itemDist[k]) itemDist[k] = { name: k, list: [] };
       itemDist[k].list.push({ wname: w.name, batch: getBatchName(w.batchId), qty: it.qty });
     });
   });
