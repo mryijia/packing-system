@@ -926,10 +926,14 @@ function render() {
 }
 
 function renderStats() {
-  // 统计基于全部仓库（不受筛选影响），统一用 getWarehouseStatus
-  const total = state.warehouses.length;
+  // 统计跟随当前选中的批次（不是全部仓库），但不受状态筛选/搜索词影响
+  let pool = state.warehouses;
+  if (state.selectedBatch !== 'all') {
+    pool = pool.filter(w => w.batchId === state.selectedBatch);
+  }
+  const total = pool.length;
   let done = 0, half = 0, empty = 0;
-  state.warehouses.forEach(w => {
+  pool.forEach(w => {
     const st = getWarehouseStatus(w);
     if (st === 'done') done++;
     else if (st === 'half') half++;
