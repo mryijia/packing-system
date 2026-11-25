@@ -130,12 +130,15 @@
     display: flex; flex-wrap: wrap; gap: 5px;
   }
   .batch-chip {
-    padding: 4px 10px; border-radius: 12px; font-size: 12px; cursor: pointer;
+    padding: 4px 10px; border-radius: 12px; font-size: 12px; cursor: grab;
     background: #f3f4f6; color: #4b5563; border: 1px solid transparent;
-    transition: all 0.15s;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    touch-action: none; user-select: none; -webkit-user-select: none;
   }
   .batch-chip:hover { background: #e5e7eb; }
   .batch-chip.active { background: #eef2ff; color: #4f46e5; border-color: #c7d2fe; font-weight: 500; }
+  .batch-chip.dragging { opacity: 0.45; cursor: grabbing; pointer-events: none; }
+  body.chip-dragging { cursor: grabbing; user-select: none; }
 
   /* 状态筛选 */
   .filters {
@@ -676,6 +679,7 @@
 // ========== 数据层 ==========
 const STORAGE_KEY_V2 = 'packing_system_data_v2';
 const STORAGE_KEY_V1 = 'packing_system_data_v1';
+const STORAGE_KEY_UI = 'packing_ui_state_v1';   // 记住上次选中的批次/仓库/筛选
 const DEFAULT_BATCH = { id: 'none', name: '未分类' };
 
 // ========== 云端同步配置 ==========
@@ -744,7 +748,20 @@ function loadData() {
     }
   }
   ensureDataIntegrity();
-  // 自动选一个批次（优先选有仓库的，没选过就选第一个）
+  // 恢复上次关闭前的界面状态（批次 / 仓库 / 筛选），避免刷新后总是跳到某个固定批次
+  try {
+    const ui = JSON.parse(localStorage.getItem(STORAGE_KEY_UI) || 'null');
+    if (ui) {
+      if (ui.selectedBatch && state.batches.some(b => b.id === ui.selectedBatch)) {
+        state.selectedBatch = ui.selectedBatch;
+      }
+      if (ui.selectedId && state.warehouses.some(w => w.id === ui.selectedId)) {
+        state.selectedId = ui.selectedId;
+      }
+      if (['all', 'half', 'done', 'empty'].includes(ui.filter)) state.filter = ui.filter;
+    }
+  } catch (e) {}
+  // 兜底：没有可恢复的批次时，自动选一个（优先选有仓库的）
   if (!state.selectedBatch || state.selectedBatch === '') {
     const firstWithWh = state.batches.find(b => b.id !== DEFAULT_BATCH.id && state.warehouses.some(w => w.batchId === b.id));
     state.selectedBatch = firstWithWh ? firstWithWh.id : (state.batches.find(b => b.id !== DEFAULT_BATCH.id)?.id || DEFAULT_BATCH.id);
@@ -770,6 +787,17 @@ function saveData() {
   if (CF_API_BASE && teamCode) {
     pushToCloud(false);
   }
+}
+
+// 记住界面状态（选中批次 / 仓库 / 状态筛选），刷新后回到关闭前的位置
+function saveUIState() {
+  try {
+    localStorage.setItem(STORAGE_KEY_UI, JSON.stringify({
+      selectedBatch: state.selectedBatch,
+      selectedId: state.selectedId,
+      filter: state.filter
+    }));
+  } catch (e) {}
 }
 
 // ========== 云端同步 ==========
@@ -1046,8 +1074,75 @@ function renderBatchChips() {
   el.innerHTML = state.batches.map(b => {
     const cnt = state.warehouses.filter(w => w.batchId === b.id).length;
     const act = state.selectedBatch === b.id ? 'active' : '';
-    return `<div class="batch-chip ${act}" onclick="setBatch('${b.id}')">${escapeHtml(b.name)} (${cnt})</div>`;
+    return `<div class="batch-chip ${act}" data-bid="${b.id}" draggable="false" onclick="setBatch('${b.id}')">${escapeHtml(b.name)} (${cnt})</div>`;
   }).join('');
+}
+
+// ========== 批次 chip 拖动排序（桌面/手机通用） ==========
+let _chipDragEl = null, _chipDragMoved = false, _chipStartX = 0, _chipStartY = 0;
+
+function setupBatchChipDrag() {
+  const box = document.getElementById('batchChips');
+  if (!box || box._dragBound) return;
+  box._dragBound = true;
+  box.addEventListener('pointerdown', (e) => {
+    const chip = e.target.closest('.batch-chip');
+    if (!chip) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    _chipDragEl = chip;
+    _chipDragMoved = false;
+    _chipStartX = e.clientX;
+    _chipStartY = e.clientY;
+    window.addEventListener('pointermove', onChipDragMove, { passive: false });
+    window.addEventListener('pointerup', onChipDragEnd);
+    window.addEventListener('pointercancel', onChipDragEnd);
+  });
+}
+
+function onChipDragMove(e) {
+  if (!_chipDragEl) return;
+  if (!_chipDragMoved) {
+    if (Math.abs(e.clientX - _chipStartX) < 6 && Math.abs(e.clientY - _chipStartY) < 6) return;
+    _chipDragMoved = true;
+    _chipDragEl.classList.add('dragging');
+    document.body.classList.add('chip-dragging');
+  }
+  e.preventDefault();
+  const under = document.elementFromPoint(e.clientX, e.clientY);
+  const target = under && under.closest ? under.closest('.batch-chip') : null;
+  if (target && target !== _chipDragEl && target.parentNode === _chipDragEl.parentNode) {
+    const r = target.getBoundingClientRect();
+    const before = (e.clientX - r.left) < r.width / 2;
+    target.parentNode.insertBefore(_chipDragEl, before ? target : target.nextSibling);
+  }
+}
+
+function onChipDragEnd() {
+  window.removeEventListener('pointermove', onChipDragMove);
+  window.removeEventListener('pointerup', onChipDragEnd);
+  window.removeEventListener('pointercancel', onChipDragEnd);
+  const chip = _chipDragEl;
+  const moved = _chipDragMoved;
+  _chipDragEl = null;
+  _chipDragMoved = false;
+  if (!chip) return;
+  chip.classList.remove('dragging');
+  document.body.classList.remove('chip-dragging');
+  if (!moved) return; // 没拖动，交给 onclick 正常切换批次
+  // 拖动结束会触发一次 click，拦掉避免误切批次
+  const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+  document.addEventListener('click', swallow, true);
+  setTimeout(() => document.removeEventListener('click', swallow, true), 300);
+
+  const ids = Array.from(document.querySelectorAll('#batchChips .batch-chip')).map(c => c.dataset.bid);
+  const map = {};
+  state.batches.forEach(b => { map[b.id] = b; });
+  const reordered = ids.map(id => map[id]).filter(Boolean);
+  state.batches.forEach(b => { if (!ids.includes(b.id)) reordered.push(b); });
+  state.batches = reordered;
+  saveData();
+  toast('批次顺序已保存');
+  render();
 }
 
 function renderStatusFilters() {
@@ -1539,12 +1634,14 @@ function splitAllMultiItems() {
 // ========== 筛选 / 选择 ==========
 function setFilter(f) {
   state.filter = f;
+  saveUIState();
   render();
 }
 function setBatch(bid) {
   state.selectedBatch = bid;
   // 切批次时清空批量选择（不同批次不会混选）
   state.selectedWIds.clear();
+  saveUIState();
   render();
 }
 function onSearch(kw) {
@@ -1561,6 +1658,7 @@ function selectWarehouse(id) {
   // 再点同一个仓库 = 取消选中
   state.selectedId = (state.selectedId === id) ? null : id;
   closeDrawer(); // 手机上选完仓库自动关抽屉
+  saveUIState();
   render();
 }
 
@@ -2420,6 +2518,7 @@ document.addEventListener('click', (e) => {
 loadData();
 initSampleData();
 render();
+setupBatchChipDrag();
 </script>
 </body>
 </html>
