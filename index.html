@@ -2115,9 +2115,9 @@ async function exportPNG() {
     ).join('');
     const more = dist.length > 4 ? `<span style="color:#9ca3af;font-size:10px">+${dist.length - 4}</span>` : '';
     return `<tr>
-      <td style="padding:6px 12px;border-top:1px solid #f3f4f6;font-weight:500">${escapeHtml(name)}</td>
-      <td style="padding:6px 12px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5;width:70px">${total}</td>
-      <td style="padding:6px 12px;border-top:1px solid #f3f4f6;width:140px;text-align:center;color:#6b7280">${dist.length}</td>
+      <td style="padding:6px 12px;border-top:1px solid #f3f4f6;font-weight:500;word-break:break-all;overflow-wrap:anywhere">${escapeHtml(name)}</td>
+      <td style="padding:6px 12px;border-top:1px solid #f3f4f6;text-align:right;font-weight:600;color:#4f46e5">${total}</td>
+      <td style="padding:6px 12px;border-top:1px solid #f3f4f6;text-align:center;color:#6b7280">${dist.length}</td>
       <td style="padding:6px 12px;border-top:1px solid #f3f4f6">${tags}${more}</td>
     </tr>`;
   }).join('');
@@ -2157,12 +2157,12 @@ async function exportPNG() {
   ${whSections || '<div style="color:#9ca3af;text-align:center;padding:20px">暂无仓库数据</div>'}
 
   ${itemRows ? `<div style="font-size:14px;font-weight:600;color:#374151;margin:20px 0 10px">📋 物品跨仓库分布</div>
-  <table style="width:100%;border-collapse:collapse;font-size:12px;background:white;border-radius:8px;overflow:hidden">
+  <table style="width:100%;table-layout:fixed;border-collapse:collapse;font-size:12px;background:white;border-radius:8px;overflow:hidden">
     <thead><tr style="background:#f9fafb">
-      <th style="text-align:left;padding:5px 12px;color:#6b7280;font-size:11px">物品名称</th>
-      <th style="text-align:right;padding:5px 12px;color:#6b7280;font-size:11px;width:70px">总数</th>
-      <th style="text-align:center;padding:5px 12px;color:#6b7280;font-size:11px;width:140px">分布仓库数</th>
-      <th style="text-align:left;padding:5px 12px;color:#6b7280;font-size:11px">仓库预览</th>
+      <th style="text-align:left;padding:5px 12px;color:#6b7280;font-size:11px;width:44%">物品名称</th>
+      <th style="text-align:right;padding:5px 12px;color:#6b7280;font-size:11px;width:10%">总数</th>
+      <th style="text-align:center;padding:5px 12px;color:#6b7280;font-size:11px;width:14%">分布仓库数</th>
+      <th style="text-align:left;padding:5px 12px;color:#6b7280;font-size:11px;width:32%">仓库预览</th>
     </tr></thead><tbody>${itemRows}</tbody>
   </table>` : ''}
 
